@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch the lock screen's face unlock PAM configuration
+
+[Path]
+PathChanged=/etc/pam.d/omarchy-lock-fingerprint
+Unit=omarchy-face-unlock-pam.service
+
+[Install]
+WantedBy=multi-user.target

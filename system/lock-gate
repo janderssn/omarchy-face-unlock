@@ -1,0 +1,95 @@
+#!/bin/bash
+# Decides when the lock screen may scan for a face. Installed root-owned to
+# /usr/local/lib/omarchy-face-unlock/ and run by pam_exec from
+# /etc/pam.d/omarchy-lock-fingerprint, as the user who locked, around pam_howdy:
+#
+#   lock-gate pre    before the scan: wait until scanning makes sense
+#   lock-gate post   after a match: the match only counts with the screen on
+#
+# The Omarchy lock keeps one scan attempt alive at all times and only stops
+# starting new ones when it turns the screen off, so without this an attempt
+# already under way would unlock a black screen for whoever sits down.
+#
+# Any doubt fails the attempt. That never locks anyone out: the password
+# field works regardless, and the lock starts a new attempt on the next wake.
+
+PATH=/usr/bin:/bin
+mode=${1:-}
+user=${PAM_USER:-}
+[[ -n $user ]] || exit 1
+
+uid=$(id -u -- "$user" 2>/dev/null) || exit 1
+runtime=/run/user/$uid
+home=$(getent passwd "$user" | cut -d: -f6)
+config=$home/.config/omarchy-face-unlock/config.json
+presence=/run/omarchy-face-unlock/presence.json
+
+# Seconds after locking before the first scan, so locking while you look at
+# the screen does not unlock it again at once.
+GRACE=7
+# The longest one attempt waits for you to look. The lock just starts another.
+PATIENCE=25
+
+setting() {
+  local value
+  value=$(jq -r --arg key "$1" '.[$key] // empty' "$config" 2>/dev/null)
+  printf '%s\n' "${value:-$2}"
+}
+
+# True when a display of this user's Hyprland session is switched on.
+display_on() {
+  local socket instance
+  for socket in "$runtime"/hypr/*/.socket.sock; do
+    [[ -S $socket ]] || continue
+    instance=${socket%/.socket.sock}
+    XDG_RUNTIME_DIR=$runtime timeout 1 hyprctl -i "${instance##*/}" monitors -j 2>/dev/null |
+      jq -e 'map(select(.disabled == false)) | any(.dpmsStatus)' >/dev/null 2>&1 && return 0
+  done
+  return 1
+}
+
+# Seconds since the session was locked; the stand-in fprintd-list, which the
+# lock runs once per lock, records the moment. Unknown counts as long ago.
+lock_age() {
+  local stamp=$runtime/omarchy-face-unlock/locked-at locked
+  [[ -r $stamp ]] && locked=$(<"$stamp") && [[ $locked =~ ^[0-9]+$ ]] || { echo 9999; return; }
+  echo $(( $(date +%s) - locked ))
+}
+
+# True when nobody is looking at the screen. Without a working presence
+# sensor there is nothing to say, so that counts as looking.
+looking_away() {
+  jq -e '.sensor == "ok" and .present != null and (.attentive | not)' "$presence" >/dev/null 2>&1
+}
+
+case $mode in
+pre)
+  require_attention=$(setting requireAttention true)
+  grace=$(setting graceSeconds "$GRACE")
+  [[ $grace =~ ^[0-9]+$ ]] || grace=$GRACE
+
+  # A wake turns the display on and restarts scanning at the same moment;
+  # give the display a beat to come up before calling it off.
+  settle=6
+  deadline=$(( SECONDS + PATIENCE ))
+  while (( SECONDS < deadline )); do
+    if ! display_on; then
+      (( settle-- > 0 )) || exit 1
+      sleep 0.25
+      continue
+    fi
+    settle=0
+    if (( $(lock_age) >= grace )) && { [[ $require_attention != true ]] || ! looking_away; }; then
+      exit 0
+    fi
+    sleep 0.3
+  done
+  exit 1
+  ;;
+post)
+  display_on
+  ;;
+*)
+  exit 1
+  ;;
+esac

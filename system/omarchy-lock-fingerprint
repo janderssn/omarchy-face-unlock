@@ -1,0 +1,16 @@
+#%PAM-1.0
+# Face unlock on the Omarchy lock screen, installed by omarchy-face-unlock.
+# The lock runs this stack hands-free, in a loop, the way it would run
+# pam_fprintd. A password typed into the lock goes through
+# omarchy-lock-password instead and always works.
+#
+# pam_echo sends an info message first, which the lock takes as "the attempt
+# reached the device"; without it a few misses in a row would mark the reader
+# unavailable and back off to 40 seconds between scans.
+auth       optional    pam_echo.so Looking for your face
+# Scan only with the screen on, after a short grace, and while you look at it.
+auth       requisite   pam_exec.so quiet /usr/local/lib/omarchy-face-unlock/lock-gate pre
+auth       requisite   pam_howdy.so
+# A match found after the screen went dark does not unlock it.
+auth       required    pam_exec.so quiet /usr/local/lib/omarchy-face-unlock/lock-gate post
+account    include     system-local-login

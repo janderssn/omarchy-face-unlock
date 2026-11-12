@@ -1,0 +1,14 @@
+#!/bin/bash
+# Runs every test: the daemon's filter, the plugin's logic, and syntax and
+# manifest checks on everything else.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+python3 -I -B tests/test_presenced.py
+node --test tests/model.test.js
+for script in system/setup system/lock-gate system/fprintd-list system/pam-restore bin/wake-lock bin/lock-on-leave; do
+  bash -n "$script"
+done
+jq -e . manifest.json i18n/*.json >/dev/null
+if command -v omarchy >/dev/null; then omarchy plugin validate .; fi
+echo "All tests passed."

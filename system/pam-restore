@@ -1,0 +1,15 @@
+#!/bin/bash
+# Keeps /etc/pam.d/omarchy-lock-fingerprint in place. Omarchy's updates run
+# omarchy-apply-lock, which deletes that file when no real fingerprint is
+# enrolled; omarchy-face-unlock-pam.path runs this whenever it changes.
+set -euo pipefail
+
+src=/usr/local/lib/omarchy-face-unlock/omarchy-lock-fingerprint
+dst=/etc/pam.d/omarchy-lock-fingerprint
+
+# Omarchy wrote a real fingerprint stack: a reader was enrolled, and it wins.
+if [[ -f $dst ]] && grep -q 'pam_fprintd\.so' "$dst"; then
+  exit 0
+fi
+
+cmp -s "$src" "$dst" || install -m644 -o root -g root "$src" "$dst"

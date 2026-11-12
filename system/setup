@@ -1,0 +1,231 @@
+#!/bin/bash
+# Sets up, updates, checks and removes the system side of omarchy-face-unlock.
+#
+#   setup install     install or update everything (asks before each choice)
+#   setup uninstall   remove everything this installed
+#   setup status      print what is installed, as JSON; needs no password
+#
+# Run it as yourself in a terminal; it asks for sudo when it needs it. Root
+# only ever runs the copies it installs to /usr/local/lib/omarchy-face-unlock,
+# never anything from the plugin folder in your home directory.
+set -euo pipefail
+
+here=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")" && pwd)
+version=$(jq -r '.version' "$here/../manifest.json")
+
+lib=/usr/local/lib/omarchy-face-unlock
+standin=/usr/local/bin/fprintd-list
+lock_pam=/etc/pam.d/omarchy-lock-fingerprint
+units=/etc/systemd/system
+presence_unit=omarchy-face-unlock-presence.service
+pam_units=(omarchy-face-unlock-pam.path omarchy-face-unlock-pam.service)
+howdy_line='-auth      sufficient   pam_howdy.so'
+
+say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
+note() { printf '  %s\n' "$*"; }
+fail() { printf '\n%s\n' "$*" >&2; exit 1; }
+
+ask() {
+  if [[ ${ASSUME_YES:-0} == 1 ]]; then return 0; fi
+  if command -v gum >/dev/null && [[ -t 0 ]]; then
+    gum confirm "$1"
+  else
+    local reply
+    read -r -p "$1 [Y/n] " reply
+    [[ -z $reply || $reply =~ ^[Yy] ]]
+  fi
+}
+
+# ---- what this machine has -------------------------------------------------
+
+# An infrared camera delivers greyscale frames only. Face unlock with a
+# colour webcam can be fooled by a photo, so nothing else is offered.
+find_ir_camera() {
+  local node
+  for node in /dev/v4l/by-path/*-video-index0; do
+    [[ -e $node ]] || continue
+    if v4l2-ctl -d "$node" --list-formats 2>/dev/null | grep -qE "'(GREY|Y8  |Y16 )'"; then
+      printf '%s\n' "$node"
+      return 0
+    fi
+  done
+  return 1
+}
+
+find_presence_sensor() {
+  local device
+  for device in /sys/bus/iio/devices/iio:device*; do
+    [[ -r $device/name && $(<"$device/name") == prox && -e $device/scan_elements/in_proximity0_en ]] || continue
+    printf '%s\n' "$device"
+    return 0
+  done
+  return 1
+}
+
+# A real fingerprint reader owns the lock screen's hands-free slot.
+has_fingerprint() {
+  if command -v omarchy-hw-fingerprint >/dev/null && omarchy-hw-fingerprint; then return 0; fi
+  [[ -x /usr/bin/fprintd-list ]] &&
+    /usr/bin/fprintd-list "$USER" 2>/dev/null | grep -qE '^[[:space:]]*-[[:space:]]*#[0-9]+:'
+}
+
+howdy_installed() { pacman -Q howdy-next >/dev/null 2>&1; }
+
+# ---- status ----------------------------------------------------------------
+
+status() {
+  local installed="" lock=false presence=false sensor=false camera=false howdy=false
+  [[ -r $lib/VERSION ]] && installed=$(<"$lib/VERSION")
+  [[ -f $lock_pam ]] && grep -q 'omarchy-face-unlock/lock-gate' "$lock_pam" && [[ -x $standin ]] && lock=true
+  systemctl is-active --quiet "$presence_unit" 2>/dev/null && presence=true
+  find_presence_sensor >/dev/null && sensor=true
+  find_ir_camera >/dev/null && camera=true
+  howdy_installed && howdy=true
+  jq -n --arg version "$version" --arg installed "$installed" \
+    --argjson lock "$lock" --argjson presence "$presence" --argjson sensor "$sensor" \
+    --argjson camera "$camera" --argjson howdy "$howdy" \
+    '{version: $version, installed: $installed, lock: $lock, presence: $presence,
+      sensor: $sensor, camera: $camera, howdy: $howdy}'
+}
+
+# ---- install ---------------------------------------------------------------
+
+install_howdy() {
+  local camera=$1
+  if ! howdy_installed; then
+    say "Installing Howdy"
+    note "Howdy does the face recognition. It comes from the AUR (howdy-next)."
+    command -v yay >/dev/null || fail "yay is needed to install howdy-next from the AUR."
+    yay -S --needed --noconfirm howdy-next
+  fi
+
+  say "Preparing face recognition"
+  sudo howdy download-models
+  sudo howdy set device_path "$camera"
+
+  if ! sudo howdy list -U "$USER" 2>/dev/null | grep -q '[0-9]'; then
+    say "Enrolling your face"
+    note "Look straight at the camera."
+    sudo howdy add -U "$USER"
+  else
+    note "Your face is already enrolled."
+  fi
+}
+
+install_prompts() {
+  say "sudo and admin prompts"
+  if ! grep -q 'pam_howdy\.so' /etc/pam.d/sudo; then
+    if ask "Use your face for sudo too? (The password still works.)"; then
+      sudo sed -i "/^#%PAM-1.0/a $howdy_line workaround=native" /etc/pam.d/sudo
+      note "sudo: added"
+    fi
+  else
+    note "sudo: already set up"
+  fi
+
+  if [[ -f /etc/pam.d/polkit-1 ]] && grep -q 'pam_howdy\.so' /etc/pam.d/polkit-1; then
+    note "admin prompts: already set up"
+  elif ask "Use your face for graphical admin prompts too?"; then
+    if [[ ! -f /etc/pam.d/polkit-1 ]]; then
+      sudo install -m644 /usr/lib/pam.d/polkit-1 /etc/pam.d/polkit-1
+    fi
+    sudo sed -i "/^#%PAM-1.0/a $howdy_line" /etc/pam.d/polkit-1
+    note "admin prompts: added"
+  fi
+}
+
+install_files() {
+  sudo install -d -m755 "$lib"
+  sudo install -m755 "$here/lock-gate" "$here/pam-restore" "$here/presenced" "$lib/"
+  sudo install -m644 "$here/omarchy-lock-fingerprint" "$lib/"
+  printf '%s\n' "$version" | sudo tee "$lib/VERSION" >/dev/null
+}
+
+install_lock() {
+  say "Lock screen"
+  if has_fingerprint; then
+    note "This machine has a fingerprint reader, which the lock screen already uses."
+    note "Leaving the lock screen alone; face unlock stays available for sudo."
+    return 0
+  fi
+  sudo install -m755 "$here/fprintd-list" "$standin"
+  sudo install -m644 "$here/omarchy-face-unlock-pam.path" "$here/omarchy-face-unlock-pam.service" "$units/"
+  sudo systemctl daemon-reload
+  sudo "$lib/pam-restore"
+  sudo systemctl enable --now omarchy-face-unlock-pam.path >/dev/null
+  note "The lock screen now looks for your face while its screen is on."
+}
+
+install_presence() {
+  say "Presence sensor"
+  if ! find_presence_sensor >/dev/null; then
+    note "No presence sensor found. Face unlock works without one;"
+    note "wake on approach and lock on leave need it."
+    sudo systemctl disable --now "$presence_unit" >/dev/null 2>&1 || true
+    return 0
+  fi
+  sudo install -m644 "$here/$presence_unit" "$units/"
+  sudo systemctl daemon-reload
+  sudo systemctl enable "$presence_unit" >/dev/null
+  sudo systemctl restart "$presence_unit"
+  sleep 2
+  if systemctl is-active --quiet "$presence_unit"; then
+    note "The presence sensor is running."
+  else
+    note "The presence service did not start. See: journalctl -u $presence_unit"
+  fi
+}
+
+install_all() {
+  (( EUID != 0 )) || fail "Run this as yourself, not as root; it asks for sudo when it needs it."
+  command -v omarchy-shell >/dev/null || fail "This needs Omarchy."
+  [[ -f /etc/pam.d/omarchy-lock-password ]] || fail "This needs Omarchy's Quickshell lock screen (Omarchy 4.5 or later)."
+  command -v v4l2-ctl >/dev/null || sudo pacman -S --needed --noconfirm v4l-utils
+
+  local camera
+  camera=$(find_ir_camera) || fail "No infrared camera found. Face unlock needs one; a normal webcam can be fooled by a photo.
+If the laptop has one, check that the camera privacy switch is off."
+  say "Face Unlock $version"
+  note "Infrared camera: $camera"
+
+  sudo -v
+  install_howdy "$camera"
+  install_prompts
+  install_files
+  install_lock
+  install_presence
+
+  say "Done"
+  note "Lock the screen and look at it to try it."
+}
+
+# ---- uninstall -------------------------------------------------------------
+
+uninstall_all() {
+  (( EUID != 0 )) || fail "Run this as yourself, not as root."
+  ask "Remove face unlock from the lock screen, sudo and admin prompts?" || exit 0
+  sudo -v
+  sudo systemctl disable --now "$presence_unit" "${pam_units[0]}" >/dev/null 2>&1 || true
+  sudo rm -f "$units/$presence_unit" "$units/${pam_units[0]}" "$units/${pam_units[1]}"
+  sudo systemctl daemon-reload
+  if [[ -f $lock_pam ]] && grep -q 'omarchy-face-unlock/lock-gate' "$lock_pam"; then
+    sudo rm -f "$lock_pam"
+  fi
+  if [[ -f $standin ]] && grep -q 'omarchy-face-unlock' "$standin"; then
+    sudo rm -f "$standin"
+  fi
+  sudo sed -i '/pam_howdy\.so/d' /etc/pam.d/sudo
+  [[ -f /etc/pam.d/polkit-1 ]] && sudo sed -i '/pam_howdy\.so/d' /etc/pam.d/polkit-1
+  sudo rm -rf "$lib"
+  say "Removed"
+  note "Howdy and your enrolled face are still installed. To remove them too:"
+  note "  sudo howdy clear -U $USER && yay -Rns howdy-next"
+}
+
+case ${1:-install} in
+  install) install_all ;;
+  uninstall) uninstall_all ;;
+  status) status ;;
+  -h | --help) sed -n '2,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
+  *) fail "Unknown command: $1 (try: install, uninstall, status)" ;;
+esac

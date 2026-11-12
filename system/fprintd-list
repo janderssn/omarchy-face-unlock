@@ -1,0 +1,29 @@
+#!/bin/bash
+# Stand-in installed to /usr/local/bin by omarchy-face-unlock.
+#
+# The Omarchy lock screen only runs its hands-free PAM stack
+# (/etc/pam.d/omarchy-lock-fingerprint, which runs Howdy here) when
+# `fprintd-list` reports an enrolled finger. On a laptop with a face camera
+# and no fingerprint reader this reports one, so the lock looks for a face.
+#
+# Real fingerprints always win: if fprintd has any enrolled, this prints
+# exactly what the real command says and nothing else changes.
+real=/usr/bin/fprintd-list
+if [[ -x $real ]]; then
+  output=$("$real" "$@" 2>&1)
+  status=$?
+  if grep -qE '^[[:space:]]*-[[:space:]]*#[0-9]+:' <<<"$output"; then
+    printf '%s\n' "$output"
+    exit "$status"
+  fi
+fi
+
+# The lock asks once each time it locks, so this is also when the lock began;
+# the scan gate holds the first scan off for a few seconds after it.
+runtime=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+if [[ -d $runtime && -w $runtime ]]; then
+  mkdir -p "$runtime/omarchy-face-unlock" && date +%s >"$runtime/omarchy-face-unlock/locked-at"
+fi
+
+echo "Fingerprints for user ${1:-$USER} on Howdy face unlock (press):"
+echo " - #0: face"

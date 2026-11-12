@@ -1,0 +1,18 @@
+#!/bin/bash
+# Wakes the Omarchy lock screen when it is locked and dark, as if a key had
+# been pressed, so it lights up and starts looking for a face.
+#
+# The lock only wakes on input: it then turns the display on, restarts its
+# scan loop and re-arms its own blank timer. Turning the display on from
+# outside would skip the last two, so this sends it a bare Shift press, which
+# types nothing.
+[[ $(omarchy-shell lock isLocked 2>/dev/null) == true ]] || exit 0
+
+if hyprctl monitors -j 2>/dev/null | jq -e 'map(select(.disabled == false)) | any(.dpmsStatus)' >/dev/null; then
+  exit 0
+fi
+
+hyprctl eval '
+  hl.dispatch(hl.dsp.send_key_state({ mods = "", key = "Shift_L", state = "down" }))
+  hl.dispatch(hl.dsp.send_key_state({ mods = "", key = "Shift_L", state = "up" }))
+' >/dev/null

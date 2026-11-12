@@ -1,0 +1,35 @@
+[Unit]
+Description=Presence sensing for Omarchy face unlock
+Documentation=https://github.com/janderssn/omarchy-face-unlock
+
+[Service]
+ExecStart=/usr/local/lib/omarchy-face-unlock/presenced
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=omarchy-face-unlock
+RuntimeDirectoryMode=0755
+
+# It needs the sensor's sysfs switches and its character device, nothing else.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+DevicePolicy=closed
+DeviceAllow=char-iio r
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target
