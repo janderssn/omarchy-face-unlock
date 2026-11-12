@@ -6,7 +6,7 @@ import qs.Ui
 import "Model.js" as Model
 
 // Bar icon and popup for Face Unlock: whether the laptop sees you, and the
-// switches for what it does about it. All the behaviour lives in Service.qml;
+// two presence switches, named as Windows names them. All the behaviour lives in Service.qml;
 // this only shows its state and flips its settings.
 Panel {
   id: root
@@ -33,7 +33,7 @@ Panel {
   readonly property var delayOptions: [15, 30, 60, 120]
 
   // Rows the keyboard cursor walks, top to bottom.
-  readonly property var rows: (needsSetup ? ["setup"] : []).concat(sensorWorking ? ["wake", "lock", "attention"] : [])
+  readonly property var rows: (needsSetup ? ["setup"] : []).concat(sensorWorking ? ["wake", "lock"] : [])
   property int rowIndex: 0
   property bool cursorActive: false
   readonly property string currentRow: cursorActive && rows.length > 0 ? rows[Math.min(rowIndex, rows.length - 1)] : ""
@@ -77,7 +77,6 @@ Panel {
       root.close()
     } else if (row === "wake") service.setOption("wakeOnApproach", !service.wakeOnApproach)
     else if (row === "lock") service.setOption("lockOnLeave", !service.lockOnLeave)
-    else if (row === "attention") service.setOption("requireAttention", !service.requireAttention)
   }
 
   function hover(row, isHovered) {
@@ -247,19 +246,6 @@ Panel {
             })
             value: root.service ? String(root.service.lockDelaySeconds) : ""
             onChanged: function(value) { if (root.service) root.service.setOption("lockDelaySeconds", Number(value)) }
-          }
-
-          Toggle {
-            width: parent.width
-            label: strings.t("attention.label")
-            description: strings.t("attention.description")
-            foreground: root.foreground
-            accent: root.accent
-            fontFamily: root.fontFamily
-            checked: root.service ? root.service.requireAttention : false
-            hasCursor: root.currentRow === "attention"
-            onHovered: function(h) { root.hover("attention", h) }
-            onClicked: root.activate("attention")
           }
         }
       }

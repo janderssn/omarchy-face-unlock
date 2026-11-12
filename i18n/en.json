@@ -13,12 +13,16 @@
   "setup.outdated": "The plugin was updated. Run setup again to update the parts it installed on the system.",
   "setup.start": "Set up face unlock",
   "setup.update": "Update system files",
-  "wake.label": "Wake when I sit down",
-  "wake.description": "Light up the locked screen as you arrive, so it can recognise you.",
-  "lock.label": "Lock when I walk away",
-  "lock.description": "Locks after nobody has been seen and nothing touched for %1.",
-  "attention.label": "Only unlock when I'm looking",
-  "attention.description": "Scan for your face only while you look at the screen.",
-  "delay.seconds": { "one": "%1 second", "other": "%1 seconds" },
-  "delay.minutes": { "one": "%1 minute", "other": "%1 minutes" }
+  "wake.label": "Wake on approach",
+  "wake.description": "Wake the locked screen when you approach.",
+  "lock.label": "Lock on leave",
+  "lock.description": "Lock %1 after you leave.",
+  "delay.seconds": {
+    "one": "%1 second",
+    "other": "%1 seconds"
+  },
+  "delay.minutes": {
+    "one": "%1 minute",
+    "other": "%1 minutes"
+  }
 }

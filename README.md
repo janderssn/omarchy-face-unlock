@@ -55,7 +55,7 @@ The bar icon is bright while the laptop sees you and dim while it does not. Its 
 
 ## Settings
 
-The panel has a switch for each feature. They are stored in `~/.config/omarchy-face-unlock/config.json`, which you can also edit; changes apply at once.
+The panel has two switches, **Wake on approach** and **Lock on leave** (with its delay), the same two that Windows offers under Presence sensing. All settings are stored in `~/.config/omarchy-face-unlock/config.json`, which you can also edit; changes apply at once.
 
 ```json
 {
@@ -70,7 +70,7 @@ The panel has a switch for each feature. They are stored in `~/.config/omarchy-f
 |---|---|
 | `wakeOnApproach` | Light the locked screen when you sit down. |
 | `lockOnLeave` | Lock after you have been gone for `lockDelaySeconds` (10 to 600). |
-| `requireAttention` | Scan for a face only while you look at the screen. |
+| `requireAttention` | Scan for a face only while you look at the screen. File only; turn it off if unlocking is slow because the sensor misjudges where you look. |
 | `graceSeconds` | Seconds after locking before the first scan (default 7). File only. |
 
 From a script: `omarchy-shell face-unlock status` and `omarchy-shell face-unlock set lockDelaySeconds 60`.
@@ -141,7 +141,7 @@ Howdy and your enrolled face are left installed; the uninstaller prints the comm
 tests/run
 ```
 
-The plugin reloads when a file under `~/.config/omarchy/plugins/` is saved. Changes under `system/` need `system/setup install` again.
+Strings and settings reload as you save. A change to the QML needs `omarchy restart shell` when the plugin folder is a link to a checkout. Changes under `system/` need `system/setup install` again.
 
 ## License
 
