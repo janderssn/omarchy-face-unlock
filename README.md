@@ -63,6 +63,8 @@ The panel has two presence switches, **Wake on approach** and **Lock on leave** 
 
 **Use for sudo** turns face unlock for `sudo` and graphical admin prompts on or off. It asks for your password, because the setting lives in the PAM files (`/etc/pam.d/sudo` and `/etc/pam.d/polkit-1`) where only root can change it; a program running as you cannot switch it back on.
 
+Turning it on asks for your password. Turning it off shows the same prompt, but your face answers it, since admin prompts still accept it at that moment.
+
 The other settings are stored in `~/.config/omarchy-face-unlock/config.json`, which you can also edit; changes apply at once.
 
 ```json
