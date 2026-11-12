@@ -258,6 +258,9 @@ class Sensor:
             data = os.read(self.fd, self.record_size * 64)
         except BlockingIOError:
             return []
+        if not data:
+            # select() said readable and there was nothing: the device is gone.
+            raise OSError(errno.ENODEV, "sensor went away")
         reports = []
         for start in range(0, len(data) - self.record_size + 1, self.record_size):
             record = data[start:start + self.record_size]
@@ -316,6 +319,12 @@ class PrivacySwitch:
         if self.fd is not None:
             os.close(self.fd)
             self.fd = None
+
+
+def unavailable(sensor):
+    """The state to publish while there is no reading to trust."""
+    return {"version": 1, "sensor": sensor, "present": None, "attentive": False,
+            "distance_mm": None, "since": None, "camera_privacy": None, "updated": time.time()}
 
 
 def publish(state):
@@ -397,9 +406,7 @@ def main():
                 if not missing_logged:
                     log("no human-presence sensor found, waiting for one")
                     missing_logged = True
-                publish({"version": 1, "sensor": "missing", "present": None, "attentive": False,
-                         "distance_mm": None, "since": None, "camera_privacy": None,
-                         "updated": time.time()})
+                publish(unavailable("missing"))
                 time.sleep(10)
                 continue
             missing_logged = False
@@ -411,6 +418,9 @@ def main():
                 watch(sensor, switch)
             except OSError as error:
                 log(f"sensor error: {error}")
+                # The last reading must not outlive the sensor: "someone is
+                # here" left standing would stop the session ever locking.
+                publish(unavailable("error"))
                 time.sleep(2)
             finally:
                 switch.close()

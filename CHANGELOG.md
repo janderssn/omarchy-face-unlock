@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.1
+
+Fixes from a code review.
+
+- `requireAttention: false` was ignored by the lock screen, which kept requiring attention.
+- Changing a switch in the panel erased a `graceSeconds` set in the config file.
+- Lock on leave gave up for the rest of an absence when a lock was skipped (Stay Awake, lid closed) or failed. It now retries every 15 seconds while nobody is there.
+- A failing sensor left its last reading published as current, which could stop the session ever locking. The service now publishes "unknown" at once.
+
+Run **Update system files** from the panel after updating.
+
 ## 0.3.0
 
 - **Use for sudo** switch in the panel, for sudo and graphical admin prompts. Changing it asks for your password: the setting is the PAM files, so nothing running as you can switch it back on.

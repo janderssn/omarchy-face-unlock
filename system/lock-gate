@@ -30,9 +30,12 @@ GRACE=7
 # The longest one attempt waits for you to look. The lock just starts another.
 PATIENCE=25
 
+# A setting from the user's config file, or the default when it is missing.
+# Not `.[$key] // empty`: jq's // also replaces false, which would turn every
+# switched-off setting back on.
 setting() {
   local value
-  value=$(jq -r --arg key "$1" '.[$key] // empty' "$config" 2>/dev/null)
+  value=$(jq -r --arg key "$1" 'if type == "object" and has($key) and .[$key] != null then .[$key] else empty end' "$config" 2>/dev/null)
   printf '%s\n' "${value:-$2}"
 }
 

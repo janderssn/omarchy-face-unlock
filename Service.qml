@@ -63,7 +63,10 @@ Item {
     var before = presence
     var after = Model.parsePresence(text)
     presence = after
-    if (after.present !== false) leftAndLocked = false
+    if (after.present !== false) {
+      leftAndLocked = false
+      lockRetryTimer.stop()
+    }
     if (Model.arrived(before, after) && wakeOnApproach) wakeProcess.running = true
     scheduleLock()
   }
@@ -145,9 +148,23 @@ Item {
     onIsIdleChanged: if (isIdle) root.lockIfGone()
   }
 
+  // The helper can decline (Stay Awake, lid closed) or fail. The session is
+  // then still open with nobody at it, so ask again for as long as that lasts.
   Process {
     id: lockProcess
     command: [root.pluginDir + "/bin/lock-on-leave"]
+    onExited: function(exitCode) {
+      if (exitCode === 0) return
+      root.leftAndLocked = false
+      lockRetryTimer.restart()
+    }
+  }
+
+  Timer {
+    id: lockRetryTimer
+    interval: 15000
+    repeat: false
+    onTriggered: root.lockIfGone()
   }
 
   // ---- setup --------------------------------------------------------------------------

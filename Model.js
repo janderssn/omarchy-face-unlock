@@ -10,6 +10,10 @@ var DEFAULTS = {
 
 var MIN_LOCK_DELAY = 10
 var MAX_LOCK_DELAY = 600
+// graceSeconds has no switch in the panel and no entry in DEFAULTS: it stays
+// out of the file until someone writes it there, and the lock's scan gate
+// supplies the default. It must survive the panel rewriting the file.
+var MAX_GRACE = 120
 
 function clampDelay(value) {
   var n = Math.round(Number(value))
@@ -29,12 +33,17 @@ function parseConfig(text) {
   function flag(key) {
     return typeof raw[key] === "boolean" ? raw[key] : DEFAULTS[key]
   }
-  return {
+  var config = {
     lockOnLeave: flag("lockOnLeave"),
     lockDelaySeconds: raw.lockDelaySeconds === undefined ? DEFAULTS.lockDelaySeconds : clampDelay(raw.lockDelaySeconds),
     wakeOnApproach: flag("wakeOnApproach"),
     requireAttention: flag("requireAttention")
   }
+  var grace = raw.graceSeconds
+  if (typeof grace === "number" && isFinite(grace) && grace >= 0) {
+    config.graceSeconds = Math.min(MAX_GRACE, Math.round(grace))
+  }
+  return config
 }
 
 function serializeConfig(config) {
@@ -94,6 +103,7 @@ if (typeof module !== "undefined") {
     DEFAULTS: DEFAULTS,
     MIN_LOCK_DELAY: MIN_LOCK_DELAY,
     MAX_LOCK_DELAY: MAX_LOCK_DELAY,
+    MAX_GRACE: MAX_GRACE,
     clampDelay: clampDelay,
     parseConfig: parseConfig,
     serializeConfig: serializeConfig,

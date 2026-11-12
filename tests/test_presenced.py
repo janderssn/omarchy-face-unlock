@@ -107,6 +107,26 @@ class FilterTest(unittest.TestCase):
         self.assertAlmostEqual(f.deadline(3.0), 4.0)
 
 
+class FailureTest(unittest.TestCase):
+    def test_unavailable_state_claims_nothing(self):
+        state = presenced.unavailable("error")
+        self.assertEqual(state["sensor"], "error")
+        self.assertIsNone(state["present"])
+        self.assertIs(state["attentive"], False)
+        self.assertIsNone(state["camera_privacy"])
+
+    def test_end_of_file_from_the_device_is_an_error(self):
+        read_end, write_end = os.pipe()
+        os.close(write_end)
+        sensor = presenced.Sensor("/nonexistent/iio:device9")
+        sensor.fd, sensor.record_size = read_end, 12
+        try:
+            with self.assertRaises(OSError):
+                sensor.read()
+        finally:
+            os.close(read_end)
+
+
 class DecodeTest(unittest.TestCase):
     def test_px13_record_layout(self):
         channels = [

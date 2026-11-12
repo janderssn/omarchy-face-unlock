@@ -18,6 +18,19 @@ test("the lock delay is kept within sane bounds", () => {
   assert.equal(Model.parseConfig('{"lockDelaySeconds":45.4}').lockDelaySeconds, 45)
 })
 
+test("a grace period set in the file survives the panel rewriting it", () => {
+  const config = Model.parseConfig('{"graceSeconds":12,"lockOnLeave":true}')
+  assert.equal(config.graceSeconds, 12)
+  const rewritten = Model.parseConfig(Model.serializeConfig({ ...config, lockOnLeave: false }))
+  assert.equal(rewritten.graceSeconds, 12)
+  assert.equal(rewritten.lockOnLeave, false)
+  assert.equal(Model.parseConfig('{"graceSeconds":0}').graceSeconds, 0)
+  assert.equal(Model.parseConfig('{"graceSeconds":9999}').graceSeconds, Model.MAX_GRACE)
+  for (const bad of ['{"graceSeconds":"7"}', '{"graceSeconds":-1}', '{"graceSeconds":null}', "{}"]) {
+    assert.equal("graceSeconds" in Model.parseConfig(bad), false)
+  }
+})
+
 test("settings survive a round trip", () => {
   const config = { ...Model.DEFAULTS, lockDelaySeconds: 60, requireAttention: false }
   assert.deepEqual(Model.parseConfig(Model.serializeConfig(config)), config)

@@ -1,14 +1,19 @@
 #!/bin/bash
 # Locks the session because the presence sensor has seen nobody for a while.
 # The plugin decides when; this holds the last few reasons not to.
+#
+# Exits 0 only when the session is locked. Anything else tells the plugin it
+# is not, so it tries again while the seat stays empty.
 
-# Already locked.
-[[ $(omarchy-shell lock isLocked 2>/dev/null) == true ]] && exit 0
+locked() { [[ $(omarchy-shell lock isLocked 2>/dev/null) == true ]]; }
+
+locked && exit 0
 
 # With the lid closed the sensor sees the keyboard, not you.
-omarchy-hw-laptop-closed 2>/dev/null && exit 0
+omarchy-hw-laptop-closed 2>/dev/null && exit 75
 
 # Omarchy's "stay awake" switch means: leave this session alone.
-[[ -f $HOME/.local/state/omarchy/indicators/stay-awake ]] && exit 0
+[[ -f $HOME/.local/state/omarchy/indicators/stay-awake ]] && exit 75
 
-exec omarchy-system-lock
+omarchy-system-lock
+locked
