@@ -65,6 +65,7 @@ Item {
     presence = after
     if (after.present !== false) {
       leftAndLocked = false
+      lockRetryPending = false
       lockRetryTimer.stop()
     }
     if (Model.arrived(before, after) && wakeOnApproach) wakeProcess.running = true
@@ -106,10 +107,14 @@ Item {
   // out of the sensor's view (docked, or you leaning back to watch something
   // that inhibits idle) from locking under you.
   property bool leftAndLocked: false
+  // A lock was just declined or failed; nothing asks again until the retry
+  // timer says so. Without this the presence file's regular reload, which
+  // reschedules the lock, would ask again within seconds.
+  property bool lockRetryPending: false
 
   function scheduleLock() {
     var wait = lockOnLeave ? Model.lockWaitMs(presence, lockDelaySeconds, Date.now() / 1000) : -1
-    if (wait < 0 || leftAndLocked) {
+    if (wait < 0 || leftAndLocked || lockRetryPending) {
       lockTimer.stop()
       return
     }
@@ -118,7 +123,7 @@ Item {
   }
 
   function lockIfGone() {
-    if (!lockOnLeave || leftAndLocked) return
+    if (!lockOnLeave || leftAndLocked || lockRetryPending) return
     var wait = Model.lockWaitMs(presence, lockDelaySeconds, Date.now() / 1000)
     if (wait < 0) return
     if (wait > 0) {
@@ -156,6 +161,7 @@ Item {
     onExited: function(exitCode) {
       if (exitCode === 0) return
       root.leftAndLocked = false
+      root.lockRetryPending = true
       lockRetryTimer.restart()
     }
   }
@@ -164,7 +170,10 @@ Item {
     id: lockRetryTimer
     interval: 15000
     repeat: false
-    onTriggered: root.lockIfGone()
+    onTriggered: {
+      root.lockRetryPending = false
+      root.lockIfGone()
+    }
   }
 
   // ---- setup --------------------------------------------------------------------------
