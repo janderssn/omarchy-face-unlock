@@ -157,8 +157,33 @@ Item {
   property var setupStatus: null
   readonly property string setupState: Model.setupState(setupStatus)
 
+  // Face unlock for sudo and admin prompts. The setting is root's (the PAM
+  // files), so changing it goes through pkexec, which asks for the password.
+  // What was asked for is held until setup's status agrees (-1: follow it),
+  // so the switch moves at once and falls back if the prompt is cancelled.
+  property int desiredPrompts: -1
+  readonly property bool prompts: desiredPrompts === -1
+    ? !!(setupStatus && setupStatus.prompts === true) : desiredPrompts === 1
+  readonly property bool promptsBusy: desiredPrompts !== -1
+
+  function setPrompts(on) {
+    if (promptsBusy || promptsProcess.running) return
+    desiredPrompts = on ? 1 : 0
+    promptsProcess.command = ["pkexec", "/usr/local/lib/omarchy-face-unlock/prompts", on ? "on" : "off"]
+    promptsProcess.running = true
+  }
+
+  Process {
+    id: promptsProcess
+    onExited: root.refreshSetup()
+  }
+
+  // A status read already under way may predate a change; read again after it.
+  property bool refreshSetupAgain: false
+
   function refreshSetup() {
-    if (!setupProcess.running) setupProcess.running = true
+    if (setupProcess.running) refreshSetupAgain = true
+    else setupProcess.running = true
   }
 
   function runSetup() {
@@ -173,11 +198,18 @@ Item {
       waitForEnd: true
     }
     onExited: function(exitCode) {
-      if (exitCode !== 0) return
-      try {
-        root.setupStatus = JSON.parse(setupStdout.text)
-      } catch (error) {
+      if (root.refreshSetupAgain) {
+        root.refreshSetupAgain = false
+        root.refreshSetup()
+        return
       }
+      if (exitCode === 0) {
+        try {
+          root.setupStatus = JSON.parse(setupStdout.text)
+        } catch (error) {
+        }
+      }
+      if (!promptsProcess.running) root.desiredPrompts = -1
     }
   }
 
@@ -188,6 +220,7 @@ Item {
     function status(): string {
       return JSON.stringify({
         setup: root.setupState,
+        prompts: root.prompts,
         sensor: root.presence.sensor,
         present: root.present,
         attentive: root.attentive,

@@ -1,0 +1,14 @@
+#!/bin/bash
+# Run by pam_exec in /etc/pam.d/sudo and /etc/pam.d/polkit-1, just before
+# pam_howdy: exit 0 to let the face scan run, anything else to skip it and go
+# straight to the password.
+#
+# It skips the scan while the camera's privacy switch is on. The camera then
+# shows a blank picture, so a scan could only flash its infrared light and
+# make you wait for it to give up.
+#
+# The presence service writes that state, compactly, as root. If it is not
+# running nothing is known and the scan goes ahead as before.
+state=/run/omarchy-face-unlock/presence.json
+[[ -r $state ]] && grep -q '"camera_privacy":true' "$state" && exit 1
+exit 0

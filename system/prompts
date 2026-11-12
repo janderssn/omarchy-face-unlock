@@ -1,0 +1,80 @@
+#!/bin/bash
+# Turns face unlock for sudo and graphical admin prompts on or off. Installed
+# root-owned to /usr/local/lib/omarchy-face-unlock/ and run as root: by setup,
+# and by the panel's switch through pkexec, which asks for your password.
+#
+#   prompts on | off
+#
+# The setting is the PAM files themselves, so only root can change it; a
+# program running as you cannot switch face unlock for sudo back on.
+#
+# "on" puts two lines at the top of each file:
+#   the gate, which skips the next line while the camera's privacy switch is on
+#   pam_howdy as "sufficient": a match is enough, a miss falls through to the
+#   password, and a missing module is a logged failure that changes nothing.
+set -euo pipefail
+
+(( EUID == 0 )) || { echo "prompts: must run as root" >&2; exit 1; }
+
+gate=/usr/local/lib/omarchy-face-unlock/prompt-gate
+sudo_pam=/etc/pam.d/sudo
+polkit_pam=/etc/pam.d/polkit-1
+polkit_default=/usr/lib/pam.d/polkit-1
+
+# The file without anything this script ever added.
+without_face() {
+  grep -v -e 'omarchy-face-unlock/prompt-gate' -e 'pam_howdy\.so' "$1" || true
+}
+
+# Rewrite a PAM file through a temporary copy, and only if every line that
+# was there before is still there: a damaged /etc/pam.d/sudo locks you out.
+rewrite() {
+  local file=$1 howdy_options=$2 tmp
+  tmp=$(mktemp "$file.XXXXXX")
+  trap 'rm -f "$tmp"' RETURN
+  {
+    if [[ -n $howdy_options ]]; then
+      local header_done=0 line
+      while IFS= read -r line || [[ -n $line ]]; do
+        printf '%s\n' "$line"
+        if (( ! header_done )) && [[ $line == "#%PAM-1.0"* ]]; then
+          header_done=1
+          printf 'auth       [success=ignore default=1]   pam_exec.so quiet %s\n' "$gate"
+          printf 'auth       sufficient   pam_howdy.so%s\n' "${howdy_options# }"
+        fi
+      done < <(without_face "$file")
+      (( header_done )) || { echo "prompts: $file has no #%PAM-1.0 header, leaving it alone" >&2; return 1; }
+    else
+      without_face "$file"
+    fi
+  } >"$tmp"
+  if ! diff -q <(without_face "$file") <(without_face "$tmp") >/dev/null; then
+    echo "prompts: refusing to write $file, the result lost lines" >&2
+    return 1
+  fi
+  chmod --reference="$file" "$tmp"
+  chown --reference="$file" "$tmp"
+  mv -f "$tmp" "$file"
+}
+
+case ${1:-} in
+on)
+  [[ -x $gate ]] || { echo "prompts: $gate is missing; run setup first" >&2; exit 1; }
+  # sudo has a terminal, where Howdy can run beside the password prompt.
+  rewrite "$sudo_pam" "  workaround=native"
+  [[ -f $polkit_pam ]] || install -m644 "$polkit_default" "$polkit_pam"
+  rewrite "$polkit_pam" " "
+  ;;
+off)
+  rewrite "$sudo_pam" ""
+  if [[ -f $polkit_pam ]]; then
+    rewrite "$polkit_pam" ""
+    # Without our lines it is the packaged file again; drop the override.
+    if [[ -f $polkit_default ]] && cmp -s "$polkit_pam" "$polkit_default"; then rm -f "$polkit_pam"; fi
+  fi
+  ;;
+*)
+  echo "Usage: prompts on|off" >&2
+  exit 1
+  ;;
+esac

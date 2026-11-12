@@ -31,7 +31,7 @@ Then click the face icon in the bar and choose **Set up face unlock**. A termina
 
 1. installs Howdy from the AUR and its recognition models,
 2. enrolls your face,
-3. asks whether to use your face for `sudo` and admin prompts,
+3. asks whether to use your face for `sudo` and admin prompts (the panel's **Use for sudo** switch changes it later),
 4. connects face unlock to the lock screen,
 5. starts the presence service, if the laptop has a sensor.
 
@@ -55,11 +55,15 @@ The bar icon is bright while the laptop sees you and dim while it does not. Its 
 
 ### The camera privacy switch
 
-Many laptops have a key that blanks the camera in hardware, often with no light to show its state. While it is on, the panel says **Camera privacy is on**, and face unlock and the presence features pause: the sensor looks through the same camera, so it cannot tell whether you are there. The password still unlocks.
+Many laptops have a key that blanks the camera in hardware, often with no light to show its state. While it is on, the panel says **Camera privacy is on**, and face unlock and the presence features pause: the sensor looks through the same camera, so it cannot tell whether you are there. The lock screen, `sudo` and admin prompts skip the face scan and take the password. (Detecting the switch needs the presence service, so a laptop without a presence sensor still scans, and then falls back to the password.)
 
 ## Settings
 
-The panel has two switches, **Wake on approach** and **Lock on leave** (with its delay), the same two that Windows offers under Presence sensing. All settings are stored in `~/.config/omarchy-face-unlock/config.json`, which you can also edit; changes apply at once.
+The panel has two presence switches, **Wake on approach** and **Lock on leave** (with its delay), the same two that Windows offers under Presence sensing, and **Use for sudo**.
+
+**Use for sudo** turns face unlock for `sudo` and graphical admin prompts on or off. It asks for your password, because the setting lives in the PAM files (`/etc/pam.d/sudo` and `/etc/pam.d/polkit-1`) where only root can change it; a program running as you cannot switch it back on.
+
+The other settings are stored in `~/.config/omarchy-face-unlock/config.json`, which you can also edit; changes apply at once.
 
 ```json
 {
@@ -109,11 +113,11 @@ presence sensor ──> presenced (root) ──> /run/omarchy-face-unlock/presen
 
 | Path | What |
 |---|---|
-| `/usr/local/lib/omarchy-face-unlock/` | The scan gate, the presence daemon, the PAM stack's master copy |
+| `/usr/local/lib/omarchy-face-unlock/` | The scan gates, the presence daemon, the sudo switch's helper, the PAM stack's master copy |
 | `/usr/local/bin/fprintd-list` | Stand-in that makes the lock run its hands-free stack |
 | `/etc/pam.d/omarchy-lock-fingerprint` | The lock screen's face unlock stack |
 | `/etc/systemd/system/omarchy-face-unlock-*` | The presence service and the PAM file watcher |
-| `/etc/pam.d/sudo`, `/etc/pam.d/polkit-1` | One `pam_howdy.so` line each, if you said yes |
+| `/etc/pam.d/sudo`, `/etc/pam.d/polkit-1` | Two lines each while **Use for sudo** is on: the privacy gate and `pam_howdy.so` |
 
 Root only ever runs the copies under `/usr/local`, never files from the plugin folder in your home directory.
 

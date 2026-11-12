@@ -19,7 +19,6 @@ lock_pam=/etc/pam.d/omarchy-lock-fingerprint
 units=/etc/systemd/system
 presence_unit=omarchy-face-unlock-presence.service
 pam_units=(omarchy-face-unlock-pam.path omarchy-face-unlock-pam.service)
-howdy_line='-auth      sufficient   pam_howdy.so'
 
 say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 note() { printf '  %s\n' "$*"; }
@@ -74,18 +73,19 @@ howdy_installed() { pacman -Q howdy-next >/dev/null 2>&1; }
 # ---- status ----------------------------------------------------------------
 
 status() {
-  local installed="" lock=false presence=false sensor=false camera=false howdy=false
+  local installed="" lock=false presence=false sensor=false camera=false howdy=false prompts=false
   [[ -r $lib/VERSION ]] && installed=$(<"$lib/VERSION")
   [[ -f $lock_pam ]] && grep -q 'omarchy-face-unlock/lock-gate' "$lock_pam" && [[ -x $standin ]] && lock=true
   systemctl is-active --quiet "$presence_unit" 2>/dev/null && presence=true
   find_presence_sensor >/dev/null && sensor=true
   find_ir_camera >/dev/null && camera=true
   howdy_installed && howdy=true
+  grep -q 'pam_howdy\.so' /etc/pam.d/sudo 2>/dev/null && prompts=true
   jq -n --arg version "$version" --arg installed "$installed" \
     --argjson lock "$lock" --argjson presence "$presence" --argjson sensor "$sensor" \
-    --argjson camera "$camera" --argjson howdy "$howdy" \
+    --argjson camera "$camera" --argjson howdy "$howdy" --argjson prompts "$prompts" \
     '{version: $version, installed: $installed, lock: $lock, presence: $presence,
-      sensor: $sensor, camera: $camera, howdy: $howdy}'
+      sensor: $sensor, camera: $camera, howdy: $howdy, prompts: $prompts}'
 }
 
 # ---- install ---------------------------------------------------------------
@@ -112,31 +112,25 @@ install_howdy() {
   fi
 }
 
+# The panel has a switch for this too; it runs the same helper through pkexec.
 install_prompts() {
   say "sudo and admin prompts"
-  if ! grep -q 'pam_howdy\.so' /etc/pam.d/sudo; then
-    if ask "Use your face for sudo too? (The password still works.)"; then
-      sudo sed -i "/^#%PAM-1.0/a $howdy_line workaround=native" /etc/pam.d/sudo
-      note "sudo: added"
-    fi
-  else
-    note "sudo: already set up"
-  fi
-
-  if [[ -f /etc/pam.d/polkit-1 ]] && grep -q 'pam_howdy\.so' /etc/pam.d/polkit-1; then
-    note "admin prompts: already set up"
-  elif ask "Use your face for graphical admin prompts too?"; then
-    if [[ ! -f /etc/pam.d/polkit-1 ]]; then
-      sudo install -m644 /usr/lib/pam.d/polkit-1 /etc/pam.d/polkit-1
-    fi
-    sudo sed -i "/^#%PAM-1.0/a $howdy_line" /etc/pam.d/polkit-1
-    note "admin prompts: added"
+  if grep -q 'pam_howdy\.so' /etc/pam.d/sudo; then
+    # Already on: write the lines again, so an older install gets the current ones.
+    sudo "$lib/prompts" on
+    note "Your face works for sudo and admin prompts."
+  elif [[ -r $lib/VERSION ]]; then
+    note "Off. Turn it on with the Use for sudo switch in the panel."
+  elif ask "Use your face for sudo and admin prompts too? (The password still works.)"; then
+    sudo "$lib/prompts" on
+    note "Your face now works for sudo and admin prompts."
   fi
 }
 
 install_files() {
   sudo install -d -m755 "$lib"
-  sudo install -m755 "$here/lock-gate" "$here/pam-restore" "$here/presenced" "$lib/"
+  sudo install -m755 "$here/lock-gate" "$here/pam-restore" "$here/presenced" \
+    "$here/prompt-gate" "$here/prompts" "$lib/"
   sudo install -m644 "$here/omarchy-lock-fingerprint" "$lib/"
   printf '%s\n' "$version" | sudo tee "$lib/VERSION" >/dev/null
 }
@@ -190,6 +184,9 @@ If the laptop has one, check that the camera privacy switch is off."
 
   sudo -v
   install_howdy "$camera"
+  # Before the files: a first install asks, an update keeps what was chosen.
+  sudo install -d -m755 "$lib"
+  sudo install -m755 "$here/prompt-gate" "$here/prompts" "$lib/"
   install_prompts
   install_files
   install_lock
@@ -214,8 +211,12 @@ uninstall_all() {
   if [[ -f $standin ]] && grep -q 'omarchy-face-unlock' "$standin"; then
     sudo rm -f "$standin"
   fi
-  sudo sed -i '/pam_howdy\.so/d' /etc/pam.d/sudo
-  [[ -f /etc/pam.d/polkit-1 ]] && sudo sed -i '/pam_howdy\.so/d' /etc/pam.d/polkit-1
+  if [[ -x $lib/prompts ]]; then
+    sudo "$lib/prompts" off
+  else
+    sudo sed -i '/pam_howdy\.so/d' /etc/pam.d/sudo
+    [[ -f /etc/pam.d/polkit-1 ]] && sudo sed -i '/pam_howdy\.so/d' /etc/pam.d/polkit-1
+  fi
   sudo rm -rf "$lib"
   say "Removed"
   note "Howdy and your enrolled face are still installed. To remove them too:"

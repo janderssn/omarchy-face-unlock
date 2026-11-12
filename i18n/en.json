@@ -26,5 +26,7 @@
   "delay.minutes": {
     "one": "%1 minute",
     "other": "%1 minutes"
-  }
+  },
+  "prompts.label": "Use for sudo",
+  "prompts.description": "Also accept your face for sudo and admin prompts."
 }
