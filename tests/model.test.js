@@ -28,9 +28,20 @@ const away = '{"version":1,"sensor":"ok","present":false,"attentive":false,"dist
 
 test("presence is read from the daemon's file", () => {
   assert.deepEqual(Model.parsePresence(here),
-    { sensor: "ok", present: true, attentive: true, distanceMm: 412, since: 100 })
+    { sensor: "ok", present: true, attentive: true, distanceMm: 412, since: 100, cameraPrivacy: false })
   assert.deepEqual(Model.parsePresence(away),
-    { sensor: "ok", present: false, attentive: false, distanceMm: 0, since: 200 })
+    { sensor: "ok", present: false, attentive: false, distanceMm: 0, since: 200, cameraPrivacy: false })
+})
+
+test("with camera privacy on, nobody is known to be here or away", () => {
+  const blind = Model.parsePresence(
+    '{"version":1,"sensor":"ok","present":null,"attentive":false,"distance_mm":null,"since":null,"camera_privacy":true}')
+  assert.equal(blind.cameraPrivacy, true)
+  assert.equal(blind.present, null)
+  // So it neither locks the session nor wakes the lock when privacy goes off.
+  assert.equal(Model.lockWaitMs(blind, 30, 500), -1)
+  assert.equal(Model.arrived(blind, Model.parsePresence(here)), false)
+  assert.equal(Model.parsePresence('{"version":1,"sensor":"ok","present":true,"camera_privacy":null}').cameraPrivacy, false)
 })
 
 test("a missing, broken or foreign file means no sensor", () => {

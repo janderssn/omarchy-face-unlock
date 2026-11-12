@@ -41,7 +41,7 @@ function serializeConfig(config) {
   return JSON.stringify(parseConfig(JSON.stringify(config)), null, 2) + "\n"
 }
 
-var NO_SENSOR = { sensor: "off", present: null, attentive: false, distanceMm: 0, since: 0 }
+var NO_SENSOR = { sensor: "off", present: null, attentive: false, distanceMm: 0, since: 0, cameraPrivacy: false }
 
 // What the presence daemon published. `present` is true, false, or null while
 // the sensor has not said enough to decide.
@@ -62,7 +62,9 @@ function parsePresence(text) {
     present: present,
     attentive: present === true && raw.attentive === true,
     distanceMm: present === true && isFinite(distance) && distance > 0 ? Math.round(distance) : 0,
-    since: isFinite(since) && since > 0 ? since : 0
+    since: isFinite(since) && since > 0 ? since : 0,
+    // The camera's privacy switch is on; the sensor is blind while it is.
+    cameraPrivacy: raw.camera_privacy === true
   }
 }
 

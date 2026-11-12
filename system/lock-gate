@@ -62,6 +62,12 @@ looking_away() {
   jq -e '.sensor == "ok" and .present != null and (.attentive | not)' "$presence" >/dev/null 2>&1
 }
 
+# True when the camera's privacy switch is known to be on: a scan would only
+# flash the infrared light at a blank picture.
+camera_blocked() {
+  jq -e '.camera_privacy == true' "$presence" >/dev/null 2>&1
+}
+
 case $mode in
 pre)
   require_attention=$(setting requireAttention true)
@@ -79,7 +85,8 @@ pre)
       continue
     fi
     settle=0
-    if (( $(lock_age) >= grace )) && { [[ $require_attention != true ]] || ! looking_away; }; then
+    if (( $(lock_age) >= grace )) && ! camera_blocked &&
+       { [[ $require_attention != true ]] || ! looking_away; }; then
       exit 0
     fi
     sleep 0.3

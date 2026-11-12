@@ -85,6 +85,18 @@ class FilterTest(unittest.TestCase):
         self.assertEqual(states[1.9], (True, False))
         self.assertEqual(states[2.0], (True, True))
 
+    def test_camera_privacy_hides_what_the_blinded_sensor_says(self):
+        f = self.make()
+        run(f, [(0, True, True, 400), (3, False, False, 0)], 12)
+        self.assertIs(f.present, False)
+        blind = f.snapshot(0, camera_privacy=True)
+        self.assertIsNone(blind["present"])
+        self.assertIsNone(blind["since"])
+        self.assertIs(blind["attentive"], False)
+        self.assertIs(blind["camera_privacy"], True)
+        self.assertIs(f.snapshot(0, camera_privacy=False)["present"], False)
+        self.assertIsNone(f.snapshot(0)["camera_privacy"])
+
     def test_deadline_tracks_the_next_change(self):
         f = self.make()
         f.feed(True, True, 400, 0.0, 1000.0)

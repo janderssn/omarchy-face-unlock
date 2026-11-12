@@ -26,6 +26,9 @@ Panel {
   readonly property bool sensorWorking: service ? service.sensorWorking : false
   readonly property var present: service ? service.present : null
   readonly property bool watching: sensorWorking && present === true
+  // The camera's privacy switch is on. Nothing on the laptop shows it, and it
+  // blinds both face unlock and the presence sensor.
+  readonly property bool cameraPrivacy: service ? service.presence.cameraPrivacy : false
 
   // 󰱻 face recognition
   readonly property string glyph: "\u{F0C7B}"
@@ -45,14 +48,17 @@ Panel {
     if (setupState === "missing") return strings.t("status.notSetUp")
     if (service.presence.sensor === "missing") return strings.t("status.noSensor")
     if (!sensorWorking) return strings.t("status.sensorOff")
+    if (cameraPrivacy) return strings.t("status.cameraPrivacy")
     if (present === null) return strings.t("status.checking")
     if (present === false) return strings.t("status.away")
     return service.attentive ? strings.t("status.looking") : strings.t("status.here")
   }
 
-  readonly property string distanceText: watching && service.distanceMm > 0
-    ? strings.t("status.distance").arg(Commons.I18n.formatNumber(Math.round(service.distanceMm / 10)))
-    : ""
+  // Beside the status: how far away you are, or why nothing is being seen.
+  readonly property string distanceText: cameraPrivacy ? strings.t("status.paused")
+    : watching && service.distanceMm > 0
+      ? strings.t("status.distance").arg(Commons.I18n.formatNumber(Math.round(service.distanceMm / 10)))
+      : ""
 
   function delayLabel(seconds) {
     return seconds < 60

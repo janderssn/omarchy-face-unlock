@@ -53,6 +53,10 @@ Lock the screen (Super + Ctrl + L) and look at it.
 
 The bar icon is bright while the laptop sees you and dim while it does not. Its panel shows what the sensor sees and has the switches.
 
+### The camera privacy switch
+
+Many laptops have a key that blanks the camera in hardware, often with no light to show its state. While it is on, the panel says **Camera privacy is on**, and face unlock and the presence features pause: the sensor looks through the same camera, so it cannot tell whether you are there. The password still unlocks.
+
 ## Settings
 
 The panel has two switches, **Wake on approach** and **Lock on leave** (with its delay), the same two that Windows offers under Presence sensing. All settings are stored in `~/.config/omarchy-face-unlock/config.json`, which you can also edit; changes apply at once.
@@ -95,7 +99,7 @@ presence sensor ──> presenced (root) ──> /run/omarchy-face-unlock/presen
 
 **Lock screen.** Omarchy's lock runs a second, hands-free PAM stack (`omarchy-lock-fingerprint`) in a loop, meant for fingerprint readers, but only when `fprintd-list` reports an enrolled finger. Setup installs a stand-in `fprintd-list` in `/usr/local/bin` that reports one, and a PAM stack that runs Howdy between two checks (`system/lock-gate`): before the scan it waits for the screen to be on, the grace period to be over and you to be looking; after a match it checks the screen is still on. Real fingerprints always win: if fprintd has any enrolled, the stand-in passes the real answer through.
 
-**Presence.** The sensor is a HID human-presence sensor, read through the kernel's `hid-sensor-prox` IIO driver. It only reports real values while its buffer is enabled, which needs root, so a small system service (`system/presenced`, Python, no dependencies) reads it, filters out its dropouts and publishes a JSON file. The service is sandboxed: no network, read-only system, access to IIO devices only.
+**Presence.** The sensor is a HID human-presence sensor, read through the kernel's `hid-sensor-prox` IIO driver. It only reports real values while its buffer is enabled, which needs root, so a small system service (`system/presenced`, Python, no dependencies) reads it, filters out its dropouts and publishes a JSON file. It also reads the camera's privacy control (one value, never a picture). The service is sandboxed: no network, read-only system, access to IIO and camera devices only.
 
 **Wake.** The lock only wakes on input, so the plugin sends it a bare Shift key press through Hyprland when you arrive.
 
@@ -130,7 +134,7 @@ Howdy and your enrolled face are left installed; the uninstaller prints the comm
 
 ## Troubleshooting
 
-- **It does not scan at all.** Check the camera privacy switch: with it on, both cameras send blank frames. `omarchy-shell lock status` should show `"fingerprint": true`.
+- **It does not scan at all.** Check the camera privacy switch (Fn + F10 on the PX13): the panel says "Camera privacy is on" while it is. `omarchy-shell lock status` should show `"fingerprint": true`.
 - **Presence says "not running".** `systemctl status omarchy-face-unlock-presence` and `journalctl -u omarchy-face-unlock-presence`.
 - **What does the sensor see?** `cat /run/omarchy-face-unlock/presence.json`.
 - **It unlocked right after I locked.** Something woke the lock within the grace period and kept the screen on, for example a notification. Raise `graceSeconds`.

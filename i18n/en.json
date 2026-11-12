@@ -9,6 +9,8 @@
   "status.here": "You're here",
   "status.looking": "You're looking at the screen",
   "status.distance": "%1 cm",
+  "status.cameraPrivacy": "Camera privacy is on",
+  "status.paused": "Face unlock paused",
   "setup.missing": "Face unlock needs a one-time setup: it installs Howdy for face recognition, teaches it your face and connects it to the lock screen. It asks for your password.",
   "setup.outdated": "The plugin was updated. Run setup again to update the parts it installed on the system.",
   "setup.start": "Set up face unlock",

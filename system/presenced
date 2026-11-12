@@ -2,16 +2,18 @@
 """Presence daemon for omarchy-face-unlock.
 
 Reads a HID human-presence sensor through the kernel's IIO buffer, filters
-out its short dropouts, and publishes who is in front of the laptop to
-/run/omarchy-face-unlock/presence.json for the shell plugin and the lock
+out its short dropouts, and publishes who is in front of the laptop, and whether the camera's privacy
+switch is on, to /run/omarchy-face-unlock/presence.json for the shell plugin and the lock
 screen's PAM gate.
 
 The sensor only reports real values while its buffer is enabled, and enabling
 it needs root; that is the only reason this runs as a system service. It
-opens no sockets and reads nothing but the sensor.
+opens no sockets and reads nothing but the sensor and one camera control;
+it never reads a picture.
 """
 
 import errno
+import fcntl
 import glob
 import json
 import os
@@ -35,6 +37,12 @@ ARRIVE_SECONDS = float(os.environ.get("PRESENCE_ARRIVE_SECONDS", "1.0"))
 LEAVE_SECONDS = float(os.environ.get("PRESENCE_LEAVE_SECONDS", "8.0"))
 # Attention is held across the same dropouts.
 ATTENTION_HOLD_SECONDS = float(os.environ.get("PRESENCE_ATTENTION_HOLD_SECONDS", "5.0"))
+
+# How often the camera's privacy switch is read.
+PRIVACY_POLL_SECONDS = 2.0
+# VIDIOC_G_CTRL and V4L2_CID_PRIVACY from <linux/videodev2.h>.
+VIDIOC_G_CTRL = 0xC008561B
+V4L2_CID_PRIVACY = 0x009A0910
 
 # A suspend shows up as CLOCK_BOOTTIME running ahead of CLOCK_MONOTONIC.
 SLEEP_JUMP_SECONDS = 2.0
@@ -122,16 +130,22 @@ class Filter:
             waits.append(self.hold - (now - self._inattentive_at))
         return max(0.0, min(waits)) if waits else None
 
-    def snapshot(self, wall):
-        return {
+    def snapshot(self, wall, camera_privacy=None):
+        state = {
             "version": 1,
             "sensor": "ok",
             "present": self.present,
             "attentive": self.attentive,
             "distance_mm": self.distance_mm if self.present else None,
             "since": self.since,
+            "camera_privacy": camera_privacy,
             "updated": wall,
         }
+        if camera_privacy:
+            # The sensor looks through the camera, so with the privacy switch
+            # on it sees an empty seat whoever is sitting there. Say "unknown".
+            state.update(present=None, attentive=False, distance_mm=None, since=None)
+        return state
 
 
 class Channel:
@@ -258,6 +272,52 @@ class Sensor:
         return reports
 
 
+class PrivacySwitch:
+    """The privacy control of the camera the presence sensor is built into.
+
+    The switch blanks the camera in hardware and blinds the sensor with it,
+    with no light to show for it. `read()` gives True, False, or None when
+    the camera has no such control.
+    """
+
+    def __init__(self, sensor_device):
+        self.fd = None
+        for node in self._camera_nodes(sensor_device):
+            try:
+                fd = os.open(node, os.O_RDWR | os.O_NONBLOCK)
+            except OSError:
+                continue
+            self.fd = fd
+            if self.read() is not None:
+                return
+            os.close(fd)
+            self.fd = None
+
+    @staticmethod
+    def _camera_nodes(sensor_device):
+        """Video devices on the same USB device as the sensor."""
+        path = os.path.realpath(sensor_device)
+        while path != "/" and not os.path.exists(os.path.join(path, "idVendor")):
+            path = os.path.dirname(path)
+        nodes = glob.glob(os.path.join(path, "*", "video4linux", "video*"))
+        return ["/dev/" + os.path.basename(node) for node in sorted(nodes)]
+
+    def read(self):
+        if self.fd is None:
+            return None
+        control = bytearray(struct.pack("Ii", V4L2_CID_PRIVACY, 0))
+        try:
+            fcntl.ioctl(self.fd, VIDIOC_G_CTRL, control)
+        except OSError:
+            return None
+        return struct.unpack("Ii", control)[1] != 0
+
+    def close(self):
+        if self.fd is not None:
+            os.close(self.fd)
+            self.fd = None
+
+
 def publish(state):
     """Rewrite the state file in place, so a watcher keeps its handle on it."""
     payload = (json.dumps(state, separators=(",", ":")) + "\n").encode()
@@ -285,10 +345,12 @@ def stop(_signum, _frame):
     raise Stop
 
 
-def watch(sensor):
+def watch(sensor, switch):
     """Follow one sensor until it fails or the machine sleeps."""
     state = Filter()
-    publish(state.snapshot(time.time()))
+    privacy = switch.read()
+    privacy_due = time.monotonic() + PRIVACY_POLL_SECONDS
+    publish(state.snapshot(time.time(), privacy))
     offset = sleep_offset()
     while True:
         now = time.monotonic()
@@ -309,8 +371,17 @@ def watch(sensor):
             for present, attentive, distance in sensor.read():
                 changed = state.feed(present, attentive, distance, now, wall) or changed
         changed = state.tick(now, wall) or changed
+
+        if now >= privacy_due:
+            privacy_due = now + PRIVACY_POLL_SECONDS
+            before, privacy = privacy, switch.read()
+            if privacy != before:
+                if before and not privacy:
+                    # What the blinded sensor said is worthless: decide afresh.
+                    state = Filter()
+                changed = True
         if changed:
-            publish(state.snapshot(wall))
+            publish(state.snapshot(wall, privacy))
 
 
 def main():
@@ -327,19 +398,22 @@ def main():
                     log("no human-presence sensor found, waiting for one")
                     missing_logged = True
                 publish({"version": 1, "sensor": "missing", "present": None, "attentive": False,
-                         "distance_mm": None, "since": None, "updated": time.time()})
+                         "distance_mm": None, "since": None, "camera_privacy": None,
+                         "updated": time.time()})
                 time.sleep(10)
                 continue
             missing_logged = False
             sensor = Sensor(device)
+            switch = PrivacySwitch(device)
             try:
                 sensor.open()
                 log(f"watching {device}")
-                watch(sensor)
+                watch(sensor, switch)
             except OSError as error:
                 log(f"sensor error: {error}")
                 time.sleep(2)
             finally:
+                switch.close()
                 sensor.close()
                 sensor = None
     except Stop:
