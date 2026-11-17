@@ -89,6 +89,53 @@ test("the lock waits out the delay from the moment the seat emptied", () => {
   assert.equal(Model.lockWaitMs(Model.parsePresence(""), 30, 500), -1)
 })
 
+test("watching needs a working sensor that sees you look", () => {
+  assert.equal(Model.watching(Model.parsePresence(here)), true)
+  assert.equal(Model.watching(Model.parsePresence(away)), false)
+  assert.equal(Model.watching(Model.parsePresence("")), false)
+  assert.equal(Model.watching(Model.parsePresence('{"version":1,"sensor":"ok","present":true,"attentive":false}')), false)
+  assert.equal(Model.watching(Model.parsePresence('{"version":1,"sensor":"ok","present":null,"attentive":true}')), false)
+  assert.equal(Model.watching(Model.parsePresence('{"version":1,"sensor":"error","present":true,"attentive":true}')), false)
+})
+
+test("returning means sitting down or looking back at the screen", () => {
+  const lookingAway = Model.parsePresence('{"version":1,"sensor":"ok","present":true,"attentive":false}')
+  const unknown = Model.parsePresence('{"version":1,"sensor":"ok","present":null}')
+  assert.equal(Model.returned(Model.parsePresence(away), Model.parsePresence(here)), true)
+  assert.equal(Model.returned(Model.parsePresence(away), lookingAway), true)
+  assert.equal(Model.returned(unknown, Model.parsePresence(here)), true)
+  assert.equal(Model.returned(lookingAway, Model.parsePresence(here)), true)
+  assert.equal(Model.returned(Model.parsePresence(here), Model.parsePresence(here)), false)
+  assert.equal(Model.returned(Model.parsePresence(here), lookingAway), false)
+  assert.equal(Model.returned(Model.parsePresence(here), Model.parsePresence(away)), false)
+  assert.equal(Model.returned(Model.parsePresence(away), Model.parsePresence("")), false)
+})
+
+test("the new settings have defaults and refuse nonsense", () => {
+  const defaults = Model.parseConfig("")
+  assert.deepEqual([defaults.keepAwake, defaults.screensaverInput, defaults.screensaverPresence], [true, true, "return"])
+  const set = Model.parseConfig('{"keepAwake":false,"screensaverInput":"no","screensaverPresence":"watching"}')
+  assert.deepEqual([set.keepAwake, set.screensaverInput, set.screensaverPresence], [false, true, "watching"])
+  assert.equal(Model.parseConfig('{"screensaverPresence":"off"}').screensaverPresence, "off")
+  assert.equal(Model.parseConfig('{"screensaverPresence":true}').screensaverPresence, "return")
+  assert.equal(Model.parseConfig('{"screensaverPresence":"always"}').screensaverPresence, "return")
+})
+
+test("the sensor ends the screensaver as the setting says", () => {
+  const sat = Model.parsePresence(here)
+  const gone = Model.parsePresence(away)
+  // Came back.
+  assert.equal(Model.endsScreensaver("off", gone, sat), false)
+  assert.equal(Model.endsScreensaver("return", gone, sat), true)
+  assert.equal(Model.endsScreensaver("watching", gone, sat), true)
+  // Was watching all along, as when you start it yourself.
+  assert.equal(Model.endsScreensaver("return", sat, sat), false)
+  assert.equal(Model.endsScreensaver("watching", sat, sat), true)
+  // Nobody there.
+  assert.equal(Model.endsScreensaver("watching", gone, gone), false)
+  assert.equal(Model.endsScreensaver("watching", sat, gone), false)
+})
+
 test("setup state compares what is installed with this plugin's version", () => {
   assert.equal(Model.setupState(null), "unknown")
   assert.equal(Model.setupState({ version: "0.1.0", installed: "" }), "missing")

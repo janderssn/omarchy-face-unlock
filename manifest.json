@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "janderssn.face-unlock",
   "name": "Face Unlock",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "author": "janderssn",
   "description": "Unlock with your face, the way Windows Hello does: the lock screen recognises you when its screen is on, wakes as you sit down and locks when you walk away",
   "license": "MIT",
@@ -18,7 +18,7 @@
   },
   "barWidget": {
     "displayName": "Face Unlock",
-    "description": "Shows whether the laptop sees you, with switches for wake on approach, lock on leave and attention.",
+    "description": "Shows whether the laptop sees you, with switches for wake on approach, lock on leave, staying awake while you watch and the screensaver.",
     "category": "Status",
     "allowMultiple": false,
     "defaultSection": "right"

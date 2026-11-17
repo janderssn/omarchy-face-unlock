@@ -1,12 +1,14 @@
 import QtQuick
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Wayland
 import "Model.js" as Model
 
 // The part of Face Unlock that runs all the time: it follows the presence
-// sensor, wakes the lock screen when you sit down and locks the session when
-// you have walked away. The face recognition itself happens in the lock
+// sensor, wakes the lock screen when you sit down, locks the session when
+// you have walked away, keeps it awake while you watch, and lets the
+// screensaver go when you touch something or come back. The face recognition itself happens in the lock
 // screen's PAM stack (see system/), not here.
 Item {
   id: root
@@ -27,6 +29,9 @@ Item {
   readonly property int lockDelaySeconds: config.lockDelaySeconds
   readonly property bool wakeOnApproach: config.wakeOnApproach
   readonly property bool requireAttention: config.requireAttention
+  readonly property bool keepAwake: config.keepAwake
+  readonly property bool screensaverInput: config.screensaverInput
+  readonly property string screensaverPresence: config.screensaverPresence
 
   function setOption(key, value) {
     var next = Model.parseConfig(JSON.stringify(config))
@@ -69,6 +74,7 @@ Item {
       lockRetryTimer.stop()
     }
     if (Model.arrived(before, after) && wakeOnApproach) wakeProcess.running = true
+    if (screensaverSettled && Model.endsScreensaver(screensaverPresence, before, after)) stopScreensaver("presence")
     scheduleLock()
   }
 
@@ -176,6 +182,147 @@ Item {
     }
   }
 
+  // ---- keep awake while you watch -----------------------------------------------
+  // While the sensor sees you looking at the screen, the session counts as
+  // in use: no screensaver, no idle lock, whatever is playing and whether or
+  // not you touch anything. An idle inhibitor needs a surface that is on
+  // screen, so this keeps an invisible one-pixel window for it. Hyprland
+  // (0.56) only honours an inhibitor asked for after its surface is showing,
+  // so the window stays up and only the inhibitor comes and goes.
+  readonly property bool holdingAwake: keepAwake && Model.watching(presence)
+  property bool awakeWindowShown: false
+
+  Timer {
+    interval: 1000
+    running: true
+    repeat: false
+    onTriggered: root.awakeWindowShown = true
+  }
+
+  PanelWindow {
+    id: awakeWindow
+    visible: true
+    implicitWidth: 1
+    implicitHeight: 1
+    color: "transparent"
+    anchors.top: true
+    anchors.left: true
+    exclusionMode: ExclusionMode.Ignore
+    mask: Region {}
+    WlrLayershell.layer: WlrLayer.Background
+    WlrLayershell.namespace: "face-unlock-awake"
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+  }
+
+  IdleInhibitor {
+    window: awakeWindow
+    enabled: root.holdingAwake && root.awakeWindowShown
+  }
+
+  // ---- screensaver ----------------------------------------------------------------
+  // Omarchy's screensaver is a terminal that ends on a typed character only:
+  // not on Shift, a touchpad or a touch screen, so in tablet mode nothing
+  // ends it. Here any input does, and so does the sensor seeing you return.
+  // Omarchy takes the closed screensaver as activity and drops its idle lock.
+  readonly property string screensaverClass: "org.omarchy.screensaver"
+  property var screensaverWindows: ({})
+  property int screensaverCount: 0
+  // Starting the screensaver moves focus between monitors, which the
+  // compositor reports as input; only input after this counts.
+  readonly property int screensaverSettleMs: 3000
+  property bool screensaverSettled: false
+
+  function trackScreensaver(address, open) {
+    var next = {}
+    var count = 0
+    for (var key in screensaverWindows) {
+      if (key !== address) { next[key] = true; count++ }
+    }
+    if (open) { next[address] = true; count++ }
+    screensaverWindows = next
+    screensaverCount = count
+    if (open) {
+      screensaverSettled = false
+      screensaverSettleTimer.restart()
+    } else if (count === 0) {
+      screensaverSettled = false
+      screensaverSettleTimer.stop()
+    }
+  }
+
+  function stopScreensaver(reason) {
+    if (screensaverCount === 0 || stopScreensaverProcess.running) return
+    console.log("face-unlock: stopping the screensaver (" + reason + ")")
+    stopScreensaverProcess.running = true
+  }
+
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      var name = String(event && event.name ? event.name : "")
+      if (name === "openwindow") {
+        var open = event.parse(4)
+        if (String(open[2] || "") === root.screensaverClass) root.trackScreensaver(String(open[0] || ""), true)
+      } else if (name === "closewindow") {
+        var address = String(event.parse(1)[0] || "")
+        if (root.screensaverWindows[address]) root.trackScreensaver(address, false)
+      }
+    }
+  }
+
+  Timer {
+    id: screensaverSettleTimer
+    interval: root.screensaverSettleMs
+    repeat: false
+    onTriggered: {
+      root.screensaverSettled = true
+      // Already being watched as it came up.
+      if (Model.endsScreensaver(root.screensaverPresence, root.presence, root.presence)) root.stopScreensaver("presence")
+    }
+  }
+
+  // A swipe on the touchpad: see bin/pointer-moved for why the idle monitor
+  // below does not cover it.
+  Process {
+    id: pointerProcess
+    command: [root.pluginDir + "/bin/pointer-moved"]
+    running: root.screensaverInput && root.screensaverSettled && root.screensaverCount > 0
+    onExited: function(exitCode) { if (exitCode === 0) root.stopScreensaver("pointer") }
+  }
+
+  // Reports any input within a second, whatever inhibits idle.
+  IdleMonitor {
+    id: inputMonitor
+    enabled: root.screensaverInput && root.screensaverCount > 0
+    timeout: 1
+    respectInhibitors: false
+    onIsIdleChanged: if (!isIdle && root.screensaverSettled) root.stopScreensaver("input")
+  }
+
+  Process {
+    id: stopScreensaverProcess
+    command: [root.pluginDir + "/bin/stop-screensaver"]
+  }
+
+  // ---- settings window --------------------------------------------------------------
+  // Everything that can be set, in a window of its own; the bar panel keeps
+  // the status and the two switches used most.
+  property bool settingsOpen: false
+
+  function openSettings() {
+    refreshSetup()
+    settingsOpen = true
+  }
+
+  Loader {
+    active: root.settingsOpen
+    source: "Settings.qml"
+    onLoaded: {
+      item.service = root
+      item.closed.connect(function() { root.settingsOpen = false })
+    }
+  }
+
   // ---- setup --------------------------------------------------------------------------
   // The lock screen integration and the sensor service are installed with
   // sudo by system/setup; the panel offers to run it when they are missing or
@@ -254,13 +401,23 @@ Item {
         lockOnLeave: root.lockOnLeave,
         lockDelaySeconds: root.lockDelaySeconds,
         wakeOnApproach: root.wakeOnApproach,
-        requireAttention: root.requireAttention
+        requireAttention: root.requireAttention,
+        keepAwake: root.keepAwake,
+        holdingAwake: root.holdingAwake,
+        screensaverInput: root.screensaverInput,
+        screensaverPresence: root.screensaverPresence,
+        screensaverShowing: root.screensaverCount > 0
       })
     }
 
     function set(key: string, value: string): string {
-      var parsed = value === "true" ? true : (value === "false" ? false : Number(value))
+      var parsed = value === "true" ? true : (value === "false" ? false : (isNaN(Number(value)) ? value : Number(value)))
       return root.setOption(key, parsed) ? "ok" : "unchanged"
+    }
+
+    function settings(): string {
+      root.openSettings()
+      return "ok"
     }
   }
 

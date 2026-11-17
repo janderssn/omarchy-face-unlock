@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 python3 -I -B tests/test_presenced.py
 node --test tests/model.test.js
 tests/test_lock_gate.sh
-for script in system/setup system/lock-gate system/prompt-gate system/prompts system/fprintd-list system/pam-restore bin/wake-lock bin/lock-on-leave; do
+for script in system/setup system/lock-gate system/prompt-gate system/prompts system/fprintd-list system/pam-restore bin/wake-lock bin/lock-on-leave bin/stop-screensaver bin/pointer-moved; do
   bash -n "$script"
 done
 jq -e . manifest.json i18n/*.json >/dev/null

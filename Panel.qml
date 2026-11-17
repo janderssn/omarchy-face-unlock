@@ -5,8 +5,9 @@ import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
 
-// Bar icon and popup for Face Unlock: whether the laptop sees you, and the
-// two presence switches, named as Windows names them, plus one for sudo. All the behaviour lives in Service.qml;
+// Bar icon and popup for Face Unlock: whether the laptop sees you, the two
+// presence switches used most (named as Windows names them), and a button
+// for the settings window (Settings.qml), which has everything. All the behaviour lives in Service.qml;
 // this only shows its state and flips its settings.
 Panel {
   id: root
@@ -38,7 +39,7 @@ Panel {
   // Rows the keyboard cursor walks, top to bottom.
   readonly property var rows: (needsSetup ? ["setup"] : [])
     .concat(sensorWorking ? ["wake", "lock"] : [])
-    .concat(setupState === "ready" ? ["prompts"] : [])
+    .concat(["settings"])
   property int rowIndex: 0
   property bool cursorActive: false
   readonly property string currentRow: cursorActive && rows.length > 0 ? rows[Math.min(rowIndex, rows.length - 1)] : ""
@@ -85,7 +86,10 @@ Panel {
       root.close()
     } else if (row === "wake") service.setOption("wakeOnApproach", !service.wakeOnApproach)
     else if (row === "lock") service.setOption("lockOnLeave", !service.lockOnLeave)
-    else if (row === "prompts") service.setPrompts(!service.prompts)
+    else if (row === "settings") {
+      service.openSettings()
+      root.close()
+    }
   }
 
   function hover(row, isHovered) {
@@ -127,7 +131,11 @@ Panel {
     tooltipText: ""
     // Dimmed while nobody is seen, the way Omarchy's Tailscale icon reads off.
     opacity: root.watching || root.needsSetup ? 1 : 0.55
-    onPressed: function(b) { root.toggle() }
+    // Right click goes straight to the settings window.
+    onPressed: function(b) {
+      if (b === Qt.RightButton && root.service) root.service.openSettings()
+      else root.toggle()
+    }
 
     Behavior on opacity { NumberAnimation { duration: Style.duration(180); easing.type: Easing.OutCubic } }
   }
@@ -258,25 +266,54 @@ Panel {
           }
         }
 
-        // ---- sudo and admin prompts ---------------------------------------------
+        // ---- Settings ---------------------------------------------------------------
         Column {
-          visible: root.setupState === "ready"
           width: parent.width
-          spacing: Style.space(6)
+          spacing: Style.space(8)
 
           PanelSeparator { foreground: root.foreground }
 
-          Toggle {
+          // A plain row with a gear, like the Settings row of Omarchy's other panels.
+          CursorSurface {
+            id: settingsRow
             width: parent.width
-            label: strings.t("prompts.label")
-            description: strings.t("prompts.description")
+            hasCursor: root.currentRow === "settings"
             foreground: root.foreground
-            accent: root.accent
-            fontFamily: root.fontFamily
-            checked: root.service ? root.service.prompts : false
-            hasCursor: root.currentRow === "prompts"
-            onHovered: function(h) { root.hover("prompts", h) }
-            onClicked: root.activate("prompts")
+            implicitHeight: settingsContent.implicitHeight + Style.spacing.rowPaddingX
+
+            MouseArea {
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onEntered: root.hover("settings", true)
+              onClicked: root.activate("settings")
+            }
+
+            Row {
+              id: settingsContent
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              anchors.leftMargin: Style.space(10)
+              spacing: Style.space(10)
+
+              Text {
+                textFormat: Text.PlainText
+                anchors.verticalCenter: parent.verticalCenter
+                text: "\u{F0493}"   // gear
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.icon
+              }
+
+              Text {
+                textFormat: Text.PlainText
+                anchors.verticalCenter: parent.verticalCenter
+                text: strings.t("settings.open")
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+              }
+            }
           }
         }
       }

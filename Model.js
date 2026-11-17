@@ -5,8 +5,15 @@ var DEFAULTS = {
   lockOnLeave: true,
   lockDelaySeconds: 30,
   wakeOnApproach: true,
-  requireAttention: true
+  requireAttention: true,
+  keepAwake: true,
+  screensaverInput: true,
+  screensaverPresence: "return"
 }
+
+// When the sensor ends Omarchy's screensaver: never, when you come back, or
+// whenever it sees you looking at the screen.
+var SCREENSAVER_PRESENCE = ["off", "return", "watching"]
 
 var MIN_LOCK_DELAY = 10
 var MAX_LOCK_DELAY = 600
@@ -37,7 +44,11 @@ function parseConfig(text) {
     lockOnLeave: flag("lockOnLeave"),
     lockDelaySeconds: raw.lockDelaySeconds === undefined ? DEFAULTS.lockDelaySeconds : clampDelay(raw.lockDelaySeconds),
     wakeOnApproach: flag("wakeOnApproach"),
-    requireAttention: flag("requireAttention")
+    requireAttention: flag("requireAttention"),
+    keepAwake: flag("keepAwake"),
+    screensaverInput: flag("screensaverInput"),
+    screensaverPresence: SCREENSAVER_PRESENCE.indexOf(raw.screensaverPresence) >= 0
+      ? raw.screensaverPresence : DEFAULTS.screensaverPresence
   }
   var grace = raw.graceSeconds
   if (typeof grace === "number" && isFinite(grace) && grace >= 0) {
@@ -90,6 +101,30 @@ function lockWaitMs(presence, delaySeconds, nowSeconds) {
   return Math.max(0, Math.round(left * 1000))
 }
 
+// Someone is watching the screen: no reason to start a screensaver or lock.
+// Anything short of a working sensor saying so leaves the idle timers alone,
+// so a blind or broken sensor can never keep the session open.
+function watching(presence) {
+  return presence.sensor === "ok" && presence.present === true && presence.attentive === true
+}
+
+// Someone came back to a running screensaver: they sat down, or they were
+// there all along and now look at the screen.
+function returned(before, after) {
+  if (after.sensor !== "ok" || after.present !== true) return false
+  return before.present !== true || (after.attentive && !before.attentive)
+}
+
+// Whether the sensor's news ends a running screensaver, for a setting of
+// "off", "return" or "watching". "watching" also ends one that is already up
+// when you are seen looking at it, so pass the same reading twice to ask
+// about the state alone.
+function endsScreensaver(mode, before, after) {
+  if (mode === "return") return returned(before, after)
+  if (mode === "watching") return returned(before, after) || watching(after)
+  return false
+}
+
 // Which state the system side is in, from `setup status`.
 function setupState(status) {
   if (!status || typeof status !== "object") return "unknown"
@@ -110,6 +145,10 @@ if (typeof module !== "undefined") {
     parsePresence: parsePresence,
     arrived: arrived,
     lockWaitMs: lockWaitMs,
+    watching: watching,
+    returned: returned,
+    endsScreensaver: endsScreensaver,
+    SCREENSAVER_PRESENCE: SCREENSAVER_PRESENCE,
     setupState: setupState
   }
 }

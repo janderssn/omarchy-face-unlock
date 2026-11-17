@@ -1,0 +1,15 @@
+#!/bin/bash
+# Waits for the pointer to move while Omarchy's screensaver is showing.
+# Exits 0 when it moved, 1 when the screensaver went away first.
+#
+# Seen on Hyprland 0.56: with the screensaver up, moving the pointer did not
+# reach the plugin's idle monitor as activity, while a click did, so a swipe
+# on the touchpad would not end the screensaver. The pointer's position
+# still changes; this watches it.
+start=$(hyprctl cursorpos 2>/dev/null) || exit 1
+while pgrep -f '[o]rg.omarchy.screensaver' >/dev/null; do
+  sleep 0.25
+  now=$(hyprctl cursorpos 2>/dev/null) || exit 1
+  [[ $now != "$start" ]] && exit 0
+done
+exit 1

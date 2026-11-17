@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0
+
+A settings window, and three new settings.
+
+- **Settings window.** Every setting now lives in a window of its own: the **Settings** button in the bar panel, a right click on the bar icon, or `omarchy-shell face-unlock settings`. The bar panel keeps the status and the two switches used most, Wake on approach and Lock on leave; **Use for sudo** moved to the window, and **Wait until you look** (`requireAttention`), until now only in the file, has a switch there.
+
+- **Stay awake while you watch** (`keepAwake`). While the sensor sees you looking at the screen, Omarchy's screensaver and idle lock do not start, whatever is playing and whether or not you touch anything: a film in tablet mode no longer ends in the lock screen. It needs a working sensor that reports you present and attentive; with the sensor blind, unsure or broken, the idle timers run as before.
+- **Any input ends the screensaver** (`screensaverInput`). Omarchy's screensaver ends on a typed character only. Now moving the pointer, a click, or a key like Shift ends it too, so it can be dismissed in tablet mode.
+- **End the screensaver when the sensor sees you** (`screensaverPresence`): `"off"`, `"return"` (the default: when you sit down, or look back at the screen after looking away) or `"watching"` (whenever you are seen looking at the screen, which also ends one you start yourself after three seconds).
+
+Run **Update system files** from the panel after updating (the system files are unchanged; it only records the new version).
+
 ## 0.3.3
 
 - A presence sensor that has lost its detection settings is repaired by the service. On the ASUS PX13 (webcam `13D3:52B9`) the sensor's presence threshold and range sensitivity read 0 after some boots; it then saw nobody, through restarts, reboots and power-offs, until Windows wrote the settings again. The service now checks them when it starts and whenever the sensor has been silent for 20 s, and writes back the values Windows uses. It writes only to sensors it knows (one so far) and only when a setting reads 0, so values chosen on purpose stay.

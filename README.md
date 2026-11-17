@@ -31,7 +31,7 @@ Then click the face icon in the bar and choose **Set up face unlock**. A termina
 
 1. installs Howdy from the AUR and its recognition models,
 2. enrolls your face,
-3. asks whether to use your face for `sudo` and admin prompts (the panel's **Use for sudo** switch changes it later),
+3. asks whether to use your face for `sudo` and admin prompts (the **Use for sudo** switch in the settings window changes it later),
 4. connects face unlock to the lock screen,
 5. starts the presence service, if the laptop has a sensor.
 
@@ -51,7 +51,7 @@ Lock the screen (Super + Ctrl + L) and look at it.
 | Someone else sits down | The screen lights and stays locked. |
 | You walk away | The session locks after 30 seconds. |
 
-The bar icon is bright while the laptop sees you and dim while it does not. Its panel shows what the sensor sees and has the switches.
+The bar icon is bright while the laptop sees you and dim while it does not. Its panel shows what the sensor sees, the two switches used most and a **Settings** row.
 
 ### The camera privacy switch
 
@@ -59,7 +59,7 @@ Many laptops have a key that blanks the camera in hardware, often with no light 
 
 ## Settings
 
-The panel has two presence switches, **Wake on approach** and **Lock on leave** (with its delay), the same two that Windows offers under Presence sensing, and **Use for sudo**.
+The bar panel shows what the sensor sees and has the two switches used most, **Wake on approach** and **Lock on leave** (with its delay), the same two that Windows offers under Presence sensing. Everything else is in the settings window: the panel's **Settings** button, a right click on the bar icon, or `omarchy-shell face-unlock settings`.
 
 **Use for sudo** turns face unlock for `sudo` and graphical admin prompts on or off. It asks for your password, because the setting lives in the PAM files (`/etc/pam.d/sudo` and `/etc/pam.d/polkit-1`) where only root can change it; a program running as you cannot switch it back on.
 
@@ -72,7 +72,10 @@ The other settings are stored in `~/.config/omarchy-face-unlock/config.json`, wh
   "wakeOnApproach": true,
   "lockOnLeave": true,
   "lockDelaySeconds": 30,
-  "requireAttention": true
+  "requireAttention": true,
+  "keepAwake": true,
+  "screensaverInput": true,
+  "screensaverPresence": "return"
 }
 ```
 
@@ -80,7 +83,10 @@ The other settings are stored in `~/.config/omarchy-face-unlock/config.json`, wh
 |---|---|
 | `wakeOnApproach` | Light the locked screen when you sit down. |
 | `lockOnLeave` | Lock after you have been gone for `lockDelaySeconds` (10 to 600). |
-| `requireAttention` | Scan for a face only while you look at the screen. File only; turn it off if unlocking is slow because the sensor misjudges where you look. |
+| `requireAttention` | Scan for a face only while you look at the screen. Turn it off if unlocking is slow because the sensor misjudges where you look. |
+| `keepAwake` | While the sensor sees you looking at the screen, hold off Omarchy's screensaver and idle lock. Needs a working sensor; when it is blind or unsure the idle timers run as usual. |
+| `screensaverInput` | End Omarchy's screensaver on any input: moving the pointer, a click, or a key like Shift. By itself it ends on a typed character only, which leaves no way out in tablet mode. Works without a sensor. |
+| `screensaverPresence` | When the sensor ends the screensaver: `"off"` never; `"return"` when you sit down, or look back at the screen after looking away; `"watching"` whenever it sees you looking at the screen, which also ends one you start yourself, three seconds in. |
 | `graceSeconds` | Seconds after locking before the first scan (default 7). File only. |
 
 From a script: `omarchy-shell face-unlock status` and `omarchy-shell face-unlock set lockDelaySeconds 60`.

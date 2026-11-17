@@ -1,0 +1,10 @@
+#!/bin/bash
+# Ends Omarchy's screensaver the way a typed key does: its terminals close and
+# the pointer comes back. The plugin decides when.
+pgrep -f '[o]rg.omarchy.screensaver' >/dev/null || exit 0
+
+pkill -x ttfx 2>/dev/null
+pkill -f '[o]rg.omarchy.screensaver' 2>/dev/null
+# The screensaver hides the pointer and shows it again as it exits; make sure.
+hyprctl eval 'hl.config({ cursor = { invisible = false } })' &>/dev/null ||
+  hyprctl keyword cursor:invisible false &>/dev/null || true
