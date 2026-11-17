@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "janderssn.face-unlock",
   "name": "Face Unlock",
-  "version": "0.3.1",
+  "version": "0.3.3",
   "author": "janderssn",
   "description": "Unlock with your face, the way Windows Hello does: the lock screen recognises you when its screen is on, wakes as you sit down and locks when you walk away",
   "license": "MIT",

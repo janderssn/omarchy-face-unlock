@@ -9,8 +9,9 @@ RestartSec=5
 RuntimeDirectory=omarchy-face-unlock
 RuntimeDirectoryMode=0755
 
-# It needs the sensor's sysfs switches and character device, and the camera
-# node for its privacy control. Nothing else.
+# It needs the sensor's sysfs switches and character device, the camera
+# node for its privacy control, and the sensor's raw HID node to write its
+# detection settings back when it has lost them. Nothing else.
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
@@ -20,6 +21,7 @@ RestrictAddressFamilies=AF_UNIX
 DevicePolicy=closed
 DeviceAllow=char-iio r
 DeviceAllow=char-video4linux rw
+DeviceAllow=char-hidraw rw
 ProtectKernelModules=yes
 ProtectKernelLogs=yes
 ProtectControlGroups=yes

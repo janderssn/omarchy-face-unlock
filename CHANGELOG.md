@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.3
+
+- A presence sensor that has lost its detection settings is repaired by the service. On the ASUS PX13 (webcam `13D3:52B9`) the sensor's presence threshold and range sensitivity read 0 after some boots; it then saw nobody, through restarts, reboots and power-offs, until Windows wrote the settings again. The service now checks them when it starts and whenever the sensor has been silent for 20 s, and writes back the values Windows uses. It writes only to sensors it knows (one so far) and only when a setting reads 0, so values chosen on purpose stay.
+- For that, the service may now open raw HID devices (`DeviceAllow=char-hidraw rw`).
+
+Run **Update system files** from the panel after updating.
+
+## 0.3.2
+
+- A presence sensor that never started reporting (seen once, after a cold boot) stayed silent until the next sleep, and the laptop believed the seat was empty. The service now notices the silence and switches the sensor off and on again, waiting for the kernel to really power it down in between. Restarting the service did not do that.
+- sudo now goes straight to the password prompt when your face is not recognized. With Howdy running beside the prompt (`workaround=native`), a missed face also failed the password check, so sudo said "try again" and scanned once more, about 15 seconds before you could type. The face scan now comes first (at most Howdy's timeout, 4 s), then the password prompt.
+- The 0.3.2 presence watchdog did not revive the stuck sensor of 2026-11-15; only booting Windows did. It stays, since it is harmless while the sensor streams.
+
+Run **Update system files** from the panel after updating; it rewrites `/etc/pam.d/sudo` when face unlock for sudo is on.
+
 ## 0.3.1
 
 Fixes from a code review.

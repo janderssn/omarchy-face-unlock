@@ -9,7 +9,8 @@ screen's PAM gate.
 The sensor only reports real values while its buffer is enabled, and enabling
 it needs root; that is the only reason this runs as a system service. It
 opens no sockets and reads nothing but the sensor and one camera control;
-it never reads a picture.
+it never reads a picture. The one thing it writes to hardware is a known
+sensor's own detection settings, when the sensor has lost them.
 """
 
 import errno
@@ -46,6 +47,36 @@ V4L2_CID_PRIVACY = 0x009A0910
 
 # A suspend shows up as CLOCK_BOOTTIME running ahead of CLOCK_MONOTONIC.
 SLEEP_JUMP_SECONDS = 2.0
+
+# A working sensor keeps reporting while it sees someone. One that has said
+# nothing for this long, with nobody known to be there, may never have been
+# switched on: the kernel sends its power-on command once, and a sensor that
+# missed it (seen on the PX13 after a cold boot) stays silent for good. It is
+# then switched off and on again, at growing intervals because an empty room
+# may look the same.
+STALL_SECONDS = float(os.environ.get("PRESENCE_STALL_SECONDS", "20.0"))
+STALL_MAX_SECONDS = 600.0
+# How long to wait for the kernel to really power the sensor down. Its
+# autosuspend delay is three seconds; re-enabling the buffer sooner changes
+# nothing in the sensor at all.
+POWER_DOWN_SECONDS = 8.0
+
+# Some sensors lose their detection settings and then see nobody, whoever
+# sits there: on the PX13 the presence threshold and the range sensitivity
+# read 0 after some boots, through reboots and power-offs, until Windows
+# wrote them again. For the sensors listed here the service writes them back
+# itself. The values are what Windows leaves in the sensor, by HID sensor
+# usage: report interval (ms), range sensitivity and presence threshold (mm),
+# head roll, pitch and yaw sensitivity (degrees).
+KNOWN_SETTINGS = {
+    "13D3:52B9": {0x030E: 50, 0x14B2: 200, 0x74B1: 1200, 0x14C0: 10, 0x14C1: 10, 0x14C2: 10},
+}
+# A sensor has lost its settings when one of these reads zero.
+LOST_WHEN_ZERO = (0x14B2, 0x74B1)
+HID_SENSOR_PAGE = 0x20
+# HIDIOCSFEATURE(0) and HIDIOCGFEATURE(0) from <linux/hidraw.h>; the length goes in bits 16-29.
+HIDIOCSFEATURE = 0xC0004806
+HIDIOCGFEATURE = 0xC0004807
 
 
 class Filter:
@@ -146,6 +177,43 @@ class Filter:
             # on it sees an empty seat whoever is sitting there. Say "unknown".
             state.update(present=None, attentive=False, distance_mm=None, since=None)
         return state
+
+
+class Stall:
+    """Decides when a silent sensor is due to be switched off and on again.
+
+    Pure logic with the clock passed in.
+    """
+
+    def __init__(self, now, first=STALL_SECONDS, longest=STALL_MAX_SECONDS):
+        self.first = first
+        self.longest = longest
+        self.wait = first
+        self.last = now
+        self.cycles = 0    # power cycles since the sensor last said anything
+
+    def heard(self, now):
+        """The sensor reported. Returns True when that ends a silence it was cycled for."""
+        recovered = self.cycles > 0
+        self.last = now
+        self.wait = self.first
+        self.cycles = 0
+        return recovered
+
+    def due(self, now, present):
+        # Someone sitting still is seen without a pause; silence then is not
+        # a reason to blind the sensor for a few seconds.
+        return present is not True and now - self.last >= self.wait
+
+    def waited(self, now):
+        """Something else was tried; give the sensor the first wait again."""
+        self.last = now
+        self.wait = self.first
+
+    def cycled(self, now):
+        self.cycles += 1
+        self.last = now
+        self.wait = min(self.wait * 2, self.longest)
 
 
 class Channel:
@@ -252,6 +320,33 @@ class Sensor:
         except OSError:
             pass  # the device is gone; there is nothing left to switch off
 
+    def _power_status(self):
+        # Runtime power management sits on the HID sensor the IIO device hangs off.
+        try:
+            return read_text(os.path.join(os.path.realpath(self.device), "..", "power", "runtime_status"))
+        except OSError:
+            return None
+
+    def power_cycle(self, timeout=POWER_DOWN_SECONDS, pause=0.25):
+        """Switch the sensor off, wait until the kernel has powered it down, and open it again.
+
+        Closing and reopening at once does not reach the sensor: the kernel
+        keeps it powered for its autosuspend delay and sends the power-on
+        command only when it wakes it from a real power-down. Returns True
+        when the power-down was seen.
+        """
+        self.close()
+        down = False
+        deadline = time.monotonic() + timeout
+        while self._power_status() in ("active", "suspending", "resuming"):
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(pause)
+        else:
+            down = self._power_status() == "suspended"
+        self.open()
+        return down
+
     def read(self):
         """Decoded reports waiting in the buffer: (present, attentive, distance_mm)."""
         try:
@@ -321,6 +416,144 @@ class PrivacySwitch:
             self.fd = None
 
 
+def feature_fields(descriptor):
+    """Where a HID report descriptor puts its sensor feature values.
+
+    Returns ({usage: (report_id, bit_offset, bits)}, {report_id: byte_length})
+    for the plain (variable) fields on the HID sensor page; the first field
+    wins when a usage appears twice.
+    """
+    fields, bits_used = {}, {}
+    page = size = count = report_id = 0
+    usages, usage_min = [], None
+    at = 0
+    while at < len(descriptor):
+        prefix = descriptor[at]
+        if prefix == 0xFE:  # long item: skip it
+            at += 3 + (descriptor[at + 1] if at + 1 < len(descriptor) else 0)
+            continue
+        length = (0, 1, 2, 4)[prefix & 3]
+        kind, tag = (prefix >> 2) & 3, prefix >> 4
+        value = int.from_bytes(descriptor[at + 1:at + 1 + length], "little")
+        at += 1 + length
+        if kind == 1:  # global
+            if tag == 0:
+                page = value
+            elif tag == 7:
+                size = value
+            elif tag == 8:
+                report_id = value
+            elif tag == 9:
+                count = value
+        elif kind == 2:  # local
+            if tag == 0:
+                usages.append(value)
+            elif tag == 1:
+                usage_min = value
+            elif tag == 2 and usage_min is not None:
+                usages.extend(range(usage_min, value + 1))
+                usage_min = None
+        elif kind == 0:  # main
+            if tag == 11:  # feature
+                offset = bits_used.get(report_id, 0)
+                variable = not value & 1 and value & 2
+                for index in range(count):
+                    if variable and usages and page == HID_SENSOR_PAGE:
+                        usage = usages[min(index, len(usages) - 1)]
+                        fields.setdefault(usage, (report_id, offset, size))
+                    offset += size
+                bits_used[report_id] = offset
+            usages, usage_min = [], None
+    return fields, {rid: (bits + 7) // 8 for rid, bits in bits_used.items()}
+
+
+def lost_settings(report, places, good):
+    """The feature report with `good` written in, when the sensor has lost its settings.
+
+    `report` is the report without its id byte, `places` maps usage to
+    (bit_offset, bits). Returns None when nothing reads zero that should not,
+    so settings somebody chose on purpose are left alone.
+    """
+    value = int.from_bytes(report, "little")
+
+    def field(usage):
+        offset, bits = places[usage]
+        return (value >> offset) & ((1 << bits) - 1)
+
+    if not any(usage in places and usage in good and field(usage) == 0 for usage in LOST_WHEN_ZERO):
+        return None
+    for usage, wanted in good.items():
+        if usage not in places:
+            continue
+        offset, bits = places[usage]
+        mask = (1 << bits) - 1
+        value = (value & ~(mask << offset)) | ((wanted & mask) << offset)
+    return value.to_bytes(len(report), "little")
+
+
+class Settings:
+    """Writes a known sensor's detection settings back when it has lost them."""
+
+    def __init__(self, sensor_device):
+        self.node = None
+        self.failed = False
+        try:
+            # The IIO device hangs off the HID device, which has the raw node.
+            path = os.path.realpath(sensor_device)
+            while path != "/" and not os.path.isdir(os.path.join(path, "hidraw")):
+                path = os.path.dirname(path)
+            match = re.match(r"^[0-9A-F]{4}:([0-9A-F]{4}:[0-9A-F]{4})\.", os.path.basename(path))
+            good = KNOWN_SETTINGS.get(match.group(1)) if match else None
+            if not good:
+                return
+            with open(os.path.join(path, "report_descriptor"), "rb") as handle:
+                fields, lengths = feature_fields(handle.read())
+            # Only what sits in the report that holds the presence threshold.
+            report_ids = {fields[usage][0] for usage in LOST_WHEN_ZERO if usage in fields}
+            if len(report_ids) != 1:
+                return
+            self.report_id = report_ids.pop()
+            self.length = lengths[self.report_id]
+            self.places = {usage: (offset, bits) for usage, (rid, offset, bits) in fields.items()
+                           if rid == self.report_id}
+            self.good = good
+            self.node = "/dev/" + sorted(os.listdir(os.path.join(path, "hidraw")))[0]
+        except (OSError, IndexError, KeyError):
+            self.node = None
+
+    def _feature(self, fd, request, report):
+        buffer = bytearray(bytes([self.report_id]) + report)
+        fcntl.ioctl(fd, request | (len(buffer) << 16), buffer, True)
+        return bytes(buffer[1:])
+
+    def repair(self):
+        """Returns True when lost settings were written back."""
+        if self.node is None:
+            return False
+        try:
+            fd = os.open(self.node, os.O_RDWR)
+            try:
+                wanted = lost_settings(self._feature(fd, HIDIOCGFEATURE, bytes(self.length)),
+                                       self.places, self.good)
+                if wanted is None:
+                    return False
+                self._feature(fd, HIDIOCSFEATURE, wanted)
+                kept = self._feature(fd, HIDIOCGFEATURE, bytes(self.length)) == wanted
+            finally:
+                os.close(fd)
+        except OSError as error:
+            if not self.failed:
+                log(f"could not check the sensor's settings: {error}")
+            self.failed = True
+            return False
+        if kept:
+            log("the sensor had lost its detection settings; wrote them back")
+        elif not self.failed:
+            log("the sensor has lost its detection settings and did not take them back")
+        self.failed = not kept
+        return kept
+
+
 def unavailable(sensor):
     """The state to publish while there is no reading to trust."""
     return {"version": 1, "sensor": sensor, "present": None, "attentive": False,
@@ -354,13 +587,14 @@ def stop(_signum, _frame):
     raise Stop
 
 
-def watch(sensor, switch):
+def watch(sensor, switch, settings):
     """Follow one sensor until it fails or the machine sleeps."""
     state = Filter()
     privacy = switch.read()
     privacy_due = time.monotonic() + PRIVACY_POLL_SECONDS
     publish(state.snapshot(time.time(), privacy))
     offset = sleep_offset()
+    stall = Stall(time.monotonic())
     while True:
         now = time.monotonic()
         wait = state.deadline(now)
@@ -379,7 +613,21 @@ def watch(sensor, switch):
         if ready:
             for present, attentive, distance in sensor.read():
                 changed = state.feed(present, attentive, distance, now, wall) or changed
+                if stall.heard(now):
+                    log("the sensor is reporting again")
         changed = state.tick(now, wall) or changed
+
+        if stall.due(now, state.present) and settings.repair():
+            # It reports again by itself once it has its settings.
+            stall.waited(time.monotonic())
+        elif stall.due(now, state.present):
+            if stall.cycles == 0:
+                log(f"no report from the sensor for {now - stall.last:.0f} s, switching it off and on")
+            # What is published stays: an empty seat is still the best guess.
+            down = sensor.power_cycle()
+            if not down and stall.cycles == 0:
+                log("the kernel did not power the sensor down")
+            stall.cycled(time.monotonic())
 
         if now >= privacy_due:
             privacy_due = now + PRIVACY_POLL_SECONDS
@@ -412,10 +660,12 @@ def main():
             missing_logged = False
             sensor = Sensor(device)
             switch = PrivacySwitch(device)
+            settings = Settings(device)
             try:
+                settings.repair()
                 sensor.open()
                 log(f"watching {device}")
-                watch(sensor, switch)
+                watch(sensor, switch, settings)
             except OSError as error:
                 log(f"sensor error: {error}")
                 # The last reading must not outlive the sensor: "someone is

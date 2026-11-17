@@ -60,8 +60,10 @@ rewrite() {
 case ${1:-} in
 on)
   [[ -x $gate ]] || { echo "prompts: $gate is missing; run setup first" >&2; exit 1; }
-  # sudo has a terminal, where Howdy can run beside the password prompt.
-  rewrite "$sudo_pam" "  workaround=native"
+  # No workaround=native for sudo: running Howdy beside the password prompt
+  # made a missed face fail the password too, so sudo said "try again" and
+  # scanned again. Plain, a miss goes straight to the password prompt.
+  rewrite "$sudo_pam" " "
   [[ -f $polkit_pam ]] || install -m644 "$polkit_default" "$polkit_pam"
   rewrite "$polkit_pam" " "
   ;;
